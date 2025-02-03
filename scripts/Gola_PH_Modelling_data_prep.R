@@ -11,17 +11,37 @@
 #install.packages('Microsoft365R')
 
 # load packages
-library(Microsoft365R)
+library(hms)
 library(readxl)
 library(tidyverse)
 library(lubridate)
 library(spOccupancy)
-filter - dplyrfilter
-select - dplyrselect
-rename - dplyrrename 
+filter <- dplyr::filter
+select <- dplyr::select
+rename <- dplyr::rename 
+
+
+# set working directory
+# setwd('C:/Users/filib/Documents/Praktika/RSPB/Gola_PH_Modelling')
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##### 2. Read in data and tidy everything up 
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 # read in data 
+excel_sheets('data/Pygmy Hippopotamus MASTER 2008-2021 08May2023.xlsx')
+pres <- read_excel('data/Pygmy Hippopotamus MASTER 2008-2021 08May2023.xlsx', sheet = 'PYGMY HIPPO MASTER') # these are all presences we have across different projects
 
+# format data types properly
+str(pres)
+
+pres %>%
+  mutate(Date = as.Date(VisitDate_dd_mm_yyyy), 
+         Time = hms::as_hms(ifelse(is.na(VisitTime_hh_mm_ss), format(VisitDate_dd_mm_yyyy, '%H:%M:%S'), format(VisitTime_hh_mm_ss, '%H:%M:%S')))) %>%
+  select(DatasetName, Date, Time, VisitDate_dd_mm_yyyy, VisitTime_hh_mm_ss)
+
+# replace all -9999 by NA 
+pres[pres == -9999] <- NA 
 
 
 

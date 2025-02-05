@@ -20,7 +20,6 @@ filter <- dplyr::filter
 select <- dplyr::select
 rename <- dplyr::rename 
 
-
 # set working directory
 # setwd('C:/Users/filib/Documents/Praktika/RSPB/Gola_PH_Modelling')
 
@@ -40,8 +39,22 @@ pres %>%
          Time = hms::as_hms(ifelse(is.na(VisitTime_hh_mm_ss), format(VisitDate_dd_mm_yyyy, '%H:%M:%S'), format(VisitTime_hh_mm_ss, '%H:%M:%S')))) %>%
   select(DatasetName, Date, Time, VisitDate_dd_mm_yyyy, VisitTime_hh_mm_ss)
 
-# replace all -9999 by NA 
+# replace all -9999 with NA 
 pres[pres == -9999] <- NA 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

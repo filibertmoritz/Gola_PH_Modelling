@@ -58,6 +58,10 @@ cam_deploy <- cam_deploy %>% mutate(project = factor(ProjectIDName),
                       habitat = factor(overallhabitat)) %>% 
   select(project, country, placename, Riverlocation, PlotIDName, CameraIDName, Deployment, Collection, Camera_Functioning, UTM_X_meters, UTM_Y_meters, habitat)
 
+# there are a few inconsistencies with the data 
+cam_deploy <- cam_deploy %>% mutate(project = if_else(project == 'REDD PygmyHippo 2013-2014', 'REDD_ARTP_PygmyHippo 2013-2014', project), # assuming they are the same projects 
+                                    CameraIDName = if_else(project == 'Pygmy Hippo REDD CT 2019-2021', str_replace_all(CameraIDName, pattern = ' ', replacement = ''), CameraIDName))
+
 # format data types properly and get rid of uneeded columns - camera presence data 
 str(pres_cam) # this looks rather scattered, thus do it separately for each data set 
 pres_cam <- pres_cam %>% mutate(project = factor(project), 
@@ -77,19 +81,22 @@ cam_deploy %>% filter(project == 'Basel Zoo PygmyHippo 2018-2020') # its possibl
 
 # ARTP data - project names are different in both tables 
 pres_cam %>% filter(project == 'REDD_ARTP_PygmyHippo 2013-2014') %>% select(-notes)
-cam_deploy %>% filter(project == 'REDD PygmyHippo 2013-2014') # only join via coordinates possible 
+cam_deploy %>% filter(project == 'REDD_ARTP_PygmyHippo 2013-2014') # only join via coordinates possible 
 
 
+# Pygmy Hippo REDD CT 2019-2021
+pres_cam %>% filter(project == 'Pygmy Hippo REDD CT 2019-2021') %>% select(-notes) # the placename could be an ident representation of the site, but no equivalent in cam_deploy data 
+cam_deploy %>% filter(project == 'Pygmy Hippo REDD CT 2019-2021') # connection via CameraIDName, but unfortunately coordinates may not work
+cam_deploy %>% filter(project == 'Pygmy Hippo REDD CT 2019-2021') %>% left_join(pres_cam %>% filter(project == 'Pygmy Hippo REDD CT 2019-2021'), join_by(UTM_X_meters, UTM_Y_meters)) %>% View()
+# DWCN23 has been in the field for only one day?
 
+pres_cam %>% filter(project == 'Darwin_morroRiver') %>% select(-notes) # no coordinates available 
+cam_deploy %>% filter(project == 'Darwin_morroRiver') # ident placename between both tables (placename and CamerIDName are the same in cam_deploy)
 
+pres_cam %>% filter(project == 'IWT_CF') %>% select(-notes) #
+cam_deploy %>% filter(project == 'IWT_CF') # ident placenames, but no coordinates in presence data, lots of observations are outside the deployment period
 
-
-#
-
-
-
-
-
+# in darvinmorrow river - what is deploymentID?
 
 
 

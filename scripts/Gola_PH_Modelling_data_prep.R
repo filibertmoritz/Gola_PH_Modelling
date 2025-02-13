@@ -43,63 +43,125 @@ pres %>%
 
 pres[pres == -9999] <- NA # replace all -9999 with NA 
 
-
 # format data types properly and get rid of unneeded columns - camera deployment data 
 str(cam_deploy)
-cam_deploy <- cam_deploy %>% mutate(project = factor(ProjectIDName), 
-                      country = factor(country), 
+cam_deploy <- cam_deploy %>% mutate(Project = factor(ProjectIDName), 
+                      Country = factor(country), 
                       River = factor(Riverlocation), 
                       PlotIDName = factor(PlotIDName),
-                      placename = factor(placename), 
+                      Placename = factor(placename), 
                       CameraIDName = factor(CameraIDName), 
                       Deployment = as.Date(DeploymentDate_dd.mm.yyyy, format = '%d/%m/%Y'), 
                       Collection = as.Date(CollectionDate_dd.mm.yyyy, format = '%d/%m/%Y'), 
                       Camera_Functioning = factor(if_else(Camera_Functioning == "Camera Functioning", 'functioning', 'failure')), 
-                      habitat = factor(overallhabitat)) %>% 
-  select(project, country, placename, Riverlocation, PlotIDName, CameraIDName, Deployment, Collection, Camera_Functioning, UTM_X_meters, UTM_Y_meters, habitat)
+                      Habitat = factor(overallhabitat)) %>% 
+  select(Project, Country, Placename, River, PlotIDName, CameraIDName, Deployment, Collection, Camera_Functioning, UTM_X_meters, UTM_Y_meters, Habitat)
 
 # there are a few inconsistencies with the data 
-cam_deploy <- cam_deploy %>% mutate(project = if_else(project == 'REDD PygmyHippo 2013-2014', 'REDD_ARTP_PygmyHippo 2013-2014', project), # assuming they are the same projects 
-                                    CameraIDName = if_else(project == 'Pygmy Hippo REDD CT 2019-2021', str_replace_all(CameraIDName, pattern = ' ', replacement = ''), CameraIDName))
+cam_deploy <- cam_deploy %>% mutate(Project = if_else(Project == 'REDD PygmyHippo 2013-2014', 'REDD_ARTP_PygmyHippo 2013-2014', Project), # assuming they are the same projects 
+                                    CameraIDName = if_else(Project == 'Pygmy Hippo REDD CT 2019-2021', str_replace_all(CameraIDName, pattern = ' ', replacement = ''), CameraIDName))
 
-# format data types properly and get rid of uneeded columns - camera presence data 
+# format data types properly and get rid of unneeded columns - camera presence data 
 str(pres_cam) # this looks rather scattered, thus do it separately for each data set 
-pres_cam <- pres_cam %>% mutate(project = factor(project), 
-                    country = factor(country), 
-                    placename = factor(placename), 
-                    deploymentID = factor(deploymentID), 
-                    CameraIDName = factor(CameraIDName), 
-                    Obs_Date = as.Date(date,format = '%d/%m/%Y'), 
-                    UTM_X_meters = x_coord, UTM_Y_meters = y_coord, habitat = factor(habitat)) %>% 
-  select(project, country, placename, deploymentID, CameraIDName, Obs_Date, time, UTM_X_meters, UTM_Y_meters, count, notes)
+pres_cam <- pres_cam %>% mutate(Project = factor(project), 
+                                Country = factor(country), 
+                                Placename = factor(placename), 
+                                DeploymentID = factor(deploymentID), 
+                                CameraIDName = factor(CameraIDName), 
+                                Obs_Date = as.Date(date,format = '%d/%m/%Y'), 
+                                UTM_X_meters = x_coord, UTM_Y_meters = y_coord, habitat = factor(habitat)) %>% 
+  select(Project, Country, Placename, DeploymentID, CameraIDName, Obs_Date, time, UTM_X_meters, UTM_Y_meters, count, notes)
+
+# solve issues in Basel Zoo PygmyHippo 2018-2020 data set - transfer placename from deployment data to presence data set 
+pres_cam <- pres_cam %>% left_join(cam_deploy %>% 
+                         filter(Project == 'Basel Zoo PygmyHippo 2018-2020') %>% 
+                         select(Project, CameraIDName, UTM_X_meters, UTM_Y_meters, Placename) %>% 
+                         rename(placename = Placename), 
+                       join_by(Project, CameraIDName, UTM_X_meters, UTM_Y_meters)) %>% 
+  mutate(Placename = if_else(Project == 'Basel Zoo PygmyHippo 2018-2020', placename, Placename)) %>% select(-placename)
+
+# solve issues with ARTP data set 
+pres_cam <- pres_cam %>% filter(Project == 'REDD_ARTP_PygmyHippo 2013-2014') %>% 
+  mutate(UTM_X_meters = ifelse(UTM_X_meters == 292289, 291289, UTM_X_meters)) %>% # most likely this is a typo - replaced 2 by one to match the deployments coordoninates 
+  select(-notes, -CameraIDName, -Placename) %>% 
+  left_join(cam_deploy %>% 
+              filter(Project == 'REDD_ARTP_PygmyHippo 2013-2014') %>% 
+              select(Placename, CameraIDName, UTM_X_meters, UTM_Y_meters), 
+            join_by(UTM_X_meters, UTM_Y_meters)) %>% 
+  mutate(placename = Placename, cameraIDName = CameraIDName) %>% # create dummy columns which need to be merged with the other data frame pres cam - but only for 'REDD_ARTP_PygmyHippo 2013-2014'
+  select(UTM_Y_meters, UTM_X_meters, placename, cameraIDName) %>% 
+  distinct() %>% # remove all duplicates which resulted from replicated observations but case many to many relationship in join
+  right_join(pres_cam %>%  mutate(UTM_X_meters = ifelse(UTM_X_meters == 292289, 291289, UTM_X_meters)), join_by(UTM_X_meters, UTM_Y_meters)) %>% 
+  mutate(Placename = if_else(Project == 'REDD_ARTP_PygmyHippo 2013-2014', placename, Placename), 
+         CameraIDName = if_else(Project == 'REDD_ARTP_PygmyHippo 2013-2014', cameraIDName, CameraIDName)) %>% 
+  select(Project, Country, Placename, DeploymentID, CameraIDName,Obs_Date, time, count, UTM_X_meters, UTM_Y_meters, notes)
+
+# solve issues in the Pygmy Hippo REDD CT 2019-2021 data set 
+
+# transfer coordinates from deployment data to pres_cam data set for DArwin_morroRiver and IWT_CF data set
+pres_cam <- pres_cam %>% left_join(cam_deploy %>% select(Project, Placename, UTM_X_meters, UTM_Y_meters) %>% 
+                         filter(Project %in% c('Darwin_morroRiver', 'IWT_CF')) %>%
+                         rename(utm_y_meters = UTM_Y_meters, utm_x_meters = UTM_X_meters), 
+                       join_by(Project, Placename)) %>%
+  mutate(UTM_X_meters = if_else(Project  %in% c('Darwin_morroRiver', 'IWT_CF'), utm_x_meters, UTM_X_meters), 
+         UTM_Y_meters = if_else(Project  %in% c('Darwin_morroRiver', 'IWT_CF'), utm_y_meters, UTM_Y_meters)) %>% 
+  select(-utm_x_meters, -utm_y_meters) %>% View()
+
+
+
+ggplot() +
+  geom_point(data = cam_deploy %>% filter(Project == 'REDD_ARTP_PygmyHippo 2013-2014', UTM_X_meters > 290000), aes(y = UTM_Y_meters, x = UTM_X_meters), size = 4) +
+  geom_point(data = pres_cam %>% filter(Project == 'REDD_ARTP_PygmyHippo 2013-2014',  UTM_X_meters > 290000), aes(y = UTM_Y_meters, x = UTM_X_meters), size = 2, color = 2)
+ggplot() +
+  geom_point(data = cam_deploy %>% filter(Project == 'Pygmy Hippo REDD CT 2019-2021'), aes(y = UTM_Y_meters, x = UTM_X_meters), size = 2) +
+  geom_point(data = pres_cam %>% filter(Project == 'Pygmy Hippo REDD CT 2019-2021'), aes(y = UTM_Y_meters, x = UTM_X_meters), size = 1, color = 2)
+
+# creation of a consistent, unique SiteID, since this is missing so far
+cam_deploy <- cam_deploy %>% mutate(SiteID = case_when(Project == 'Basel Zoo PygmyHippo 2018-2020' ~ paste0(Placename, '_', CameraIDName), # Basel Zoo PH Project - River CameraIDName
+                                         Project == 'REDD_ARTP_PygmyHippo 2013-2014' ~ paste0(Placename, '_', CameraIDName),  # placename and CameraIDName
+                                         # Project == 'Pygmy Hippo REDD CT 2019-2021' ~ paste0(), # until now I did not manage to make sense of this data set
+                                         Project == 'Darwin_morroRiver' ~ Placename, 
+                                         Project == 'IWT_CF' ~ Placename)) 
+pres_cam <- pres_cam %>% mutate(SiteID = case_when(Project == 'Basel Zoo PygmyHippo 2018-2020' ~ paste0(Placename, '_', CameraIDName), # Basel Zoo PH Project - River CameraIDName
+                                       Project == 'REDD_ARTP_PygmyHippo 2013-2014' ~ paste0(Placename, '_', CameraIDName),  # placename and CameraIDName
+                                       # Project == 'Pygmy Hippo REDD CT 2019-2021' ~ paste0(), # until now I did not manage to make sense of this data set
+                                       Project == 'Darwin_morroRiver' ~ Placename, 
+                                       Project == 'IWT_CF' ~ Placename))
+
+
 
 # take the different data sources and try to identical link columns to each other for a join 
 
 # Basel Zoo data
-pres_cam %>% filter(project == 'Basel Zoo PygmyHippo 2018-2020')
-cam_deploy %>% filter(project == 'Basel Zoo PygmyHippo 2018-2020') # its possible to join the data via CameraIDName or coordinates
+pres_cam %>% filter(Project == 'Basel Zoo PygmyHippo 2018-2020')
+cam_deploy %>% filter(Project == 'Basel Zoo PygmyHippo 2018-2020') # its possible to join the data via CameraIDName or coordinates
 
 # ARTP data - project names are different in both tables 
-pres_cam %>% filter(project == 'REDD_ARTP_PygmyHippo 2013-2014') %>% select(-notes)
-cam_deploy %>% filter(project == 'REDD_ARTP_PygmyHippo 2013-2014') # only join via coordinates possible 
-
+pres_cam %>% filter(Project == 'REDD_ARTP_PygmyHippo 2013-2014') %>% select(-notes)
+cam_deploy %>% filter(Project == 'REDD_ARTP_PygmyHippo 2013-2014') # only join via coordinates possible 
 
 # Pygmy Hippo REDD CT 2019-2021
-pres_cam %>% filter(project == 'Pygmy Hippo REDD CT 2019-2021') %>% select(-notes) # the placename could be an ident representation of the site, but no equivalent in cam_deploy data 
-cam_deploy %>% filter(project == 'Pygmy Hippo REDD CT 2019-2021') # connection via CameraIDName, but unfortunately coordinates may not work
-cam_deploy %>% filter(project == 'Pygmy Hippo REDD CT 2019-2021') %>% left_join(pres_cam %>% filter(project == 'Pygmy Hippo REDD CT 2019-2021'), join_by(UTM_X_meters, UTM_Y_meters)) %>% View()
+pres_cam %>% filter(Project == 'Pygmy Hippo REDD CT 2019-2021') %>% select(-notes) # the placename could be an ident representation of the site, but no equivalent in cam_deploy data 
+cam_deploy %>% filter(Project == 'Pygmy Hippo REDD CT 2019-2021') # connection via CameraIDName, but unfortunately coordinates may not work
+cam_deploy %>% filter(Project == 'Pygmy Hippo REDD CT 2019-2021') %>% left_join(pres_cam %>% filter(Project == 'Pygmy Hippo REDD CT 2019-2021'), join_by(UTM_X_meters, UTM_Y_meters)) %>% View()
 # DWCN23 has been in the field for only one day?
 
-pres_cam %>% filter(project == 'Darwin_morroRiver') %>% select(-notes) # no coordinates available 
-cam_deploy %>% filter(project == 'Darwin_morroRiver') # ident placename between both tables (placename and CamerIDName are the same in cam_deploy)
+pres_cam %>% filter(Project == 'Darwin_morroRiver') %>% select(-notes) # no coordinates available 
+cam_deploy %>% filter(Project == 'Darwin_morroRiver') # ident placename between both tables (placename and CamerIDName are the same in cam_deploy), deployment data for second deployment periods missing
 
-pres_cam %>% filter(project == 'IWT_CF') %>% select(-notes) #
-cam_deploy %>% filter(project == 'IWT_CF') # ident placenames, but no coordinates in presence data, lots of observations are outside the deployment period
+pres_cam %>% filter(Project == 'IWT_CF') %>% select(-notes) #
+cam_deploy %>% filter(Project == 'IWT_CF') # ident placenames, but no coordinates in presence data, lots of observations are outside the deployment period
 
 # in darvinmorrow river - what is deploymentID?
 
 
 
+# join data together 
+presence <- data.frame(row.names = c('Project', 'Country', 'SiteID', 'CameraIDName', 'ObsDate', 'ObsTime', 'Count', 'UTM_X_meters', 'UTM_Y_metsers', 'Notes'))
+pres_cam %>% filter(project == 'Basel Zoo PygmyHippo 2018-2020') %>% mutate(SiteID = paste0()) # placename 
+
+deployments <- data.frame(row.names = c('Project', 'Country', 'River', 'SiteID', 'CameraIDName', 'Deployment', 'Collection', 'CameraFunctioning', 'UTM_X_meters', 'UTM_Y_metsers', 'Notes'))
+cam_deploy %>% filter(project == 'Basel Zoo PygmyHippo 2018-2020')
 
 
 

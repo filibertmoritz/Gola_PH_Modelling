@@ -1,0 +1,309 @@
+#### Pygmy hippo single season integrated occupancy model in spOccupancy  
+#### script written by Filibert Heim, filibert.heim@rspb.org.uk or filibert.heim@posteo.de, in March 2025
+
+# data has roughgly been prepared elsewhere
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##### 1. Preparatations ######
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# load packages
+library(readxl)
+library(tidyverse)
+library(lubridate)
+library(sf)
+library(data.table)
+library(spOccupancy)
+library(tmap)
+filter <- dplyr::filter
+select <- dplyr::select
+rename <- dplyr::rename 
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##### 2. load data which has been prepared elsewhere #####
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# presence and deploy/survey data 
+pres_opp <- fread(file = 'data/PH_prepared_pres_opp_data.csv', stringsAsFactors = T) %>% select(-V1)
+pres_cam <- fread(file = 'data/PH_prepared_pres_cam_data.csv', stringsAsFactors = T) %>% select(-V1)
+pres_transects <- fread(file = 'data/PH_prepared_pres_transect_data.csv', stringsAsFactors = T) %>% select(-V1)
+deploy_cam <- fread(file = 'data/PH_prepared_deploy_cam_data.csv', stringsAsFactors = T) %>% select(-V1)
+locs_transects_paths <- st_read('data/PH_prepared_transect_paths.shp')
+locs_transects_data <- fread(file = 'data/PH_prepared_transect_paths.csv', stringsAsFactors = T) %>% select(-V1)
+locs_transects <- locs_transects_paths %>% left_join(locs_transects_data, join_by(uniqueID)) # combine shp and csv file to one object 
+rm(locs_transects_data, locs_transects_paths) # remove unneeded objects 
+
+# grid and environmental covariates 
+grid_sf <- st_read('data/PH_grid.shp') %>% st_as_sf() # laod shp and transform to sf 
+envCovs <- fread('data/PH_prepared_env_covariates.csv') %>% 
+  select(-V1) %>% as_tibble()
+envCovs_sf <- grid_sf %>% left_join(envCovs, join_by(CellID)) %>% st_as_sf()# transfer geometry from grid to envCovs
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##### 3. Prepare presence camera trap data  #####
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+# create visits from camera trap deployment data 
+deploy_cam_visit <- deploy_cam %>%
+  st_as_sf(coords = c('UTM_X_meters', 'UTM_Y_meters'), remove = F, crs = 32629) %>% # create an sf
+  st_join(grid_sf) %>%
+  rowwise() %>%
+  mutate(Visit_start = list(seq(Deployment, Collection, by = "20 days"))) %>%  # split in 20 days intervals, however, there are mostly days remaining as tail
+  unnest(Visit_start) %>% 
+  group_by(SiteID, Deployment, Collection) %>% # combination of SiteID, Deployment and Collection works as deploymentID
+  mutate(Visit_end = lead(Visit_start, default = last(Collection)), 
+         Visit_start = as.POSIXct(paste0(Visit_start, ' 12:00:00'), format = '%Y-%m-%d %H:%M:%OS'), # make meaningful time up where cameras could have been deployed and collected to avoid issues with matching pictures
+         Visit_end = as.POSIXct(paste0(Visit_end, ' 12:00:00'), format = '%Y-%m-%d %H:%M:%OS'), 
+         Visit_length = difftime(Visit_end, Visit_start, units = 'days')) %>%  
+  filter(!Visit_length == 0) %>% # remove cases where 0 days were left as overshoot, 17 cases
+  arrange(CellID, SiteID, Deployment) %>%
+  group_by(CellID) %>% # CellID instead of SiteID
+  mutate(Cell_visit = row_number()) # this creates a consecutive number for each visit for each site across deployments
+
+# transfer presences to deployment data, this assumes, that the observations lie within the deployment period
+#### THIS IS A CRITICAL STEP AND I WANT THIS TO BE DOUBLECHECKED BY SOMEONE ELSE!
+deploy_cam_visit_occu <- deploy_cam_visit %>% st_drop_geometry() %>%
+  ungroup() %>%
+  left_join(pres_cam %>% select(Project, SiteID, Obs_DateTime), join_by(Project, SiteID), multiple = 'all', relationship = 'many-to-many') %>% 
+  filter(Visit_start <= Obs_DateTime & Obs_DateTime <= Visit_end) %>% 
+  group_by(SiteID, Cell_visit) %>% 
+  summarise(Presences = n_distinct(Obs_DateTime), .groups = 'drop') %>% # this produces a count of pictures, but if distinct (not just multiple pictures in a row) detections of pygmy hippos are needed, use n_distinct() here 
+  right_join(deploy_cam_visit %>% st_drop_geometry(), join_by(SiteID, Cell_visit)) %>% 
+  mutate(Presences = if_else(is.na(Presences), 0, Presences), 
+         Occu = if_else(Presences >= 1, 1, 0)) %>%
+  arrange(CellID, SiteID, Deployment, Cell_visit) 
+
+
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##### 4. Prepare transect survey data   #####
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# this option is not the best, but there could be other ways by frst sampling points on the line and then splitting the lines up at these points
+# st_line_sample and lwgeom::st_split()
+
+library(stplanr)
+
+# split transects into subtransects which are interpreted as visits 
+locs_transects <- locs_transects %>% 
+  st_intersection(grid_sf) %>%
+  st_cast(to = 'MULTILINESTRING') %>% # first transform everything to MULTILINESTRING
+  st_cast(to ='LINESTRING') %>% # transfer everything pack to linestring
+  group_by(uniqueID, CellID) %>% 
+  # mutate(transect_length = st_length(geometry, which = 'Euclidean')) %>% 
+  line_segment(segment_length = 700) %>% # segment length in the crs unit, which is meters here 
+  group_by(uniqueID, CellID) %>% 
+  mutate(subtransect = as.factor(row_number())) %>% 
+  group_by(uniqueID,CellID,subtransect) %>% 
+  mutate(transect_length = st_length(geometry, which = 'Euclidean'))
+
+# plot result  
+tmap_mode("view")  # interactive mode
+tm_shape(grid_sf) +
+  tm_polygons(fill = tm_const()) + 
+tm_shape(locs_transects) + 
+  tm_lines(col = 'subtransect', lwd = 1.5, id = 'uniqueID') 
+
+# link the presences to the subtransects 
+pres_transects_sf <- pres_transects %>% 
+  st_as_sf(coords = c('UTM_X_meters', 'UTM_Y_meters'), remove = F, crs = 32629) %>% 
+  st_transform(crs = 32629)
+
+unique_ID <- unique(locs_transects$uniqueID) # get uniqueIDs for each transect
+joined_pres <- st_join(pres_transects_sf %>% filter(uniqueID == unique_ID[1]), # create df to store data with first iteration
+                       locs_transects %>% filter(uniqueID == unique_ID[1]) %>% select(subtransect, CellID), 
+                       st_nearest_feature)
+for(i in 2:length(unique_ID)) { # loop over all other IDs 
+  df <- st_join(pres_transects_sf %>% filter(uniqueID == unique_ID[i]), 
+                locs_transects %>% filter(uniqueID == unique_ID[i]) %>% select(subtransect, CellID), 
+                st_nearest_feature)
+  joined_pres <- bind_rows(joined_pres, df) # bind results together 
+}
+pres_transects_sf <- joined_pres
+rm(joined_pres)
+
+# check, that everything went okay 
+tm_shape(grid_sf) +
+  tm_polygons() +
+tm_shape(locs_transects) + 
+  tm_lines(col='subtransect', lwd = 2, palette=c("blue", "darkgreen", "red", "lightblue", 'orange', 'purple')) +
+tm_shape(pres_transects_sf) +
+  tm_dots(col='subtransect', palette=c("blue", "darkgreen", "red", "lightblue", 'orange', 'purple'), size=0.5)
+
+# add presence absence information to locs transect df
+occu_transects <- locs_transects_visit_occu <- pres_transects_sf  %>% 
+  left_join(locs_transects %>% st_drop_geometry(), join_by(uniqueID, subtransect, CellID)) %>% 
+  group_by(CellID, uniqueID, subtransect) %>% 
+  summarise(Presences = n(), .groups = 'drop') # this produces a count of observations per subtransect in each gridCell, but if distinct (not just multiple pictures in a row) detections of pygmy hippos are needed, use n_distinct() here 
+  # st_cast(to = 'MULTIPOINT') %>% 
+
+locs_transects <- locs_transects %>% 
+  left_join(occu_transects %>% st_drop_geometry(), join_by(CellID, uniqueID, subtransect)) %>% 
+  mutate(Presences = if_else(is.na(Presences), 0, Presences),
+         Occu = if_else(Presences >= 1, 1, 0)) 
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##### 2. Create Transect data ######
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# transfer transect data into grid
+transect_grid <- grid_sf %>% 
+  left_join(locs_transects %>% st_drop_geometry(), join_by(CellID)) %>%
+  group_by(CellID) %>% 
+  mutate(Cell_visit = row_number()) %>% 
+  st_drop_geometry() %>% 
+  drop_na(Occu)
+
+# calculate a few det covariates
+
+# dry or wet season 
+# julian date 
+# transect length
+# Project 
+
+# extract det.covs data
+names(transect_grid)
+det.variables.transect <- c('Project', 'DateTime_Start', 'transect_length') # fill in all variables that are interesting
+det.covs.transect <- list()
+for(det.var in det.variables.transect){
+  dat <- transect_grid %>% ungroup() %>% 
+    select(CellID, Cell_visit, !!sym(det.var)) %>% 
+    pivot_wider(names_from = Cell_visit, names_prefix = 'Visit_',
+                values_from = !!sym(det.var))
+  det.covs.transect[[det.var]] <- dat
+  rm(dat)
+}
+
+names(deploy_cam_visit_occu)
+det.variables.camera <- c('Project', 'Visit_start', 'Visit_length') # fill in all variables which could be interesting
+det.covs.camera <- list()
+for(det.var in det.variables.camera){
+  dat <- deploy_cam_visit_occu %>% ungroup() %>% 
+    select(CellID, Cell_visit, !!sym(det.var)) %>% 
+    pivot_wider(names_from = Cell_visit, names_prefix = 'Visit_',
+                values_from = !!sym(det.var))
+  det.covs.camera[[det.var]] <- dat
+  rm(dat)
+}
+
+det.covs <- list(det.covs.transect, det.covs.camera)
+
+# extract environmental site covariates, in spOccupancy calles occ.covs 
+sites.transect <- unique(transect_grid$CellID) # fill in here also the camera site Grid cells 
+occ.covs.transect <- envCovs %>% 
+  filter(CellID %in% sites.transect) %>% 
+  arrange(CellID)
+
+sites.camera <- unique(deploy_cam_visit_occu$CellID)
+occ.covs.camera <- envCovs %>% 
+filter(CellID %in% sites.camera) %>% 
+  arrange(CellID)
+
+occ.covs <- bind_rows(occ.covs.transect, occ.covs.camera)
+
+# extract occu data as y 
+y.transect <- transect_grid %>% ungroup() %>% 
+  select(CellID, Cell_visit, Occu) %>% 
+  pivot_wider(names_from = Cell_visit, names_prefix = 'Visit_',
+              values_from = Occu)
+
+y.camera <- deploy_cam_visit_occu %>% ungroup() %>% 
+  select(CellID, Cell_visit, Occu) %>% 
+  pivot_wider(names_from = Cell_visit, names_prefix = 'Visit_',
+              values_from = Occu)
+
+y <- list(y.transect, y.camera)
+
+
+# get sites of each data source
+sites.transect.ind <- 1:length(sites.transect)
+sites.camera.ind <- (max(sites.transect.ind)+1):(max(sites.transect.ind)+length(sites.camera)+1)
+sites <- list(sites.transect.ind, sites.camera.ind)
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##### 3. bring all data together ######
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# create data list which holds all data needed to run the model
+data.list <- list(occ.covs, det.covs, y, sites)
+names(data) <- c('occ.covs', 'det.covs', 'y', 'sites')
+
+# set parameters for model 
+inits.list <- list(alpha = list(0, 0, 0, 0), # list with each tag corresponding to a parameter name 
+                   beta = 0, 
+                   #sigma.sq.psi, for random effects in the occurence model
+                   #sigma.sq.p, # for random effects in the det model 
+                   z = rep(1, J)) 
+priors.list <- list(beta.normal = list(mean = 0, var = 2.72), 
+                    alpha.normal = list(mean = list(0, 0, 0, 0), 
+                                        var = list(2.72, 2.72, 2.72, 2.72)))
+n.samples <- 5000
+
+# call model 
+out <- intPGOcc(occ.formula = ~ 1, #occ.cov, 
+                det.formula = list(f.1 = ~ 1 # det.cov.1.1, 
+                                   f.2 = ~ 1), #det.cov.2.1), 
+                data = data.list,
+                inits = inits.list,
+                n.samples = n.samples, 
+                priors = prior.list, 
+                n.omp.threads = 1, 
+                verbose = TRUE, 
+                n.report = 1000, 
+                n.burn = 1000, 
+                n.thin = 1, 
+                n.chains = 1)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+plot(locs_transects_visit_occu)
+class(locs_transects_visit_occu)
+
+# prepare opportunistic presences as sf
+# head(pres_opp)
+# str(pres_opp)
+# pres_opp <- pres_opp %>% 
+#   rename(UTM_X_meters = UTM_X_m, UTM_Y_meters = UTM_Y_m) %>% 
+#   mutate(Obs_Method = 'Opportunistic') %>%
+#   select(Project, Country, Obs_DateTime, UTM_X_meters, UTM_Y_meters, Sign, Obs_Method) 
+
+# prepare transect presences as sf
+pres_transects <- pres_transects %>% 
+  mutate(Country = 'SierraLeone', 
+         Obs_Method = 'Transect Survey')
+
+# prepare camera trap presences as sf
+head(pres_cam)
+pres_cam <- pres_cam %>% mutate(Obs_Method = 'Camera Trap') %>% 
+  select(Project, Country, Obs_DateTime, UTM_X_meters , UTM_Y_meters, SiteID, Obs_Method)
+
+# merge data together 
+pres_sf <- bind_rows(pres_cam, pres_opp,
+                     pres_transects) %>% 
+  st_as_sf(coords = c('UTM_X_meters', 'UTM_Y_meters'), remove = F, crs = 32629)
+
+
+head(hb.dat)
+
+
+######
+## data for spOccupancy has to be in a 3-dim array with dim corresponding to species (1), site (row), and replicate
+## site = row, replicated visits are columns, every value is either presence or absence 
+
+head(pres_transects)

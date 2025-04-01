@@ -76,6 +76,15 @@ deploy_cam_visit_occu <- deploy_cam_visit %>% st_drop_geometry() %>%
   arrange(CellID, SiteID, Deployment, Cell_visit) 
 
 
+# there is an issue with one camera trapping site which is outside of the study area
+deploy_cam_visit_occu <- deploy_cam_visit_occu %>% filter(!is.na(CellID )) # this filters out one camera trap which lies outside the study area
+deploy_cam_visit <- deploy_cam_visit %>% filter(!is.na(CellID))
+
+# quick plot
+tm_shape(grid_sf) +
+  tm_polygons()+
+tm_shape(deploy_cam_visit) +
+  tm_dots(fill = 'red', size = 0.5)
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -134,111 +143,179 @@ tm_shape(pres_transects_sf) +
   tm_dots(col='subtransect', palette=c("blue", "darkgreen", "red", "lightblue", 'orange', 'purple'), size=0.5)
 
 # add presence absence information to locs transect df
-occu_transects <- locs_transects_visit_occu <- pres_transects_sf  %>% 
+occu_transects <- pres_transects_sf  %>% 
   left_join(locs_transects %>% st_drop_geometry(), join_by(uniqueID, subtransect, CellID)) %>% 
   group_by(CellID, uniqueID, subtransect) %>% 
   summarise(Presences = n(), .groups = 'drop') # this produces a count of observations per subtransect in each gridCell, but if distinct (not just multiple pictures in a row) detections of pygmy hippos are needed, use n_distinct() here 
-  # st_cast(to = 'MULTIPOINT') %>% 
+  # st_cast(to = 'MULTIPOINT')
 
 locs_transects <- locs_transects %>% 
   left_join(occu_transects %>% st_drop_geometry(), join_by(CellID, uniqueID, subtransect)) %>% 
   mutate(Presences = if_else(is.na(Presences), 0, Presences),
-         Occu = if_else(Presences >= 1, 1, 0)) 
+         Occu = if_else(Presences >= 1, 1, 0)) %>% 
+  group_by(CellID) %>% 
+  mutate(Cell_visit = row_number())
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-##### 2. Create Transect data ######
+##### 5. Bring data together for spOccupancy ######
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 # transfer transect data into grid
-transect_grid <- grid_sf %>% 
-  left_join(locs_transects %>% st_drop_geometry(), join_by(CellID)) %>%
-  group_by(CellID) %>% 
-  mutate(Cell_visit = row_number()) %>% 
-  st_drop_geometry() %>% 
-  drop_na(Occu)
+# transect_grid <- grid_sf %>% 
+#   left_join(locs_transects %>% st_drop_geometry(), join_by(CellID)) %>%
+#   group_by(CellID) %>% 
+#   mutate(Cell_visit = row_number()) %>% 
+#   st_drop_geometry() %>% 
+#   drop_na(Occu)
 
-# calculate a few det covariates
 
-# dry or wet season 
-# julian date 
-# transect length
-# Project 
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+###### 5.1 Det Covs ######
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# calculate a few det covariates, improve season by assigning the season where the majority was surveyed
+locs_transects <- locs_transects %>% ungroup() %>%
+  mutate(Julian_Date_Start = lubridate::yday(DateTime_Start), # improve by taking a mean date?
+         Season = as.factor(if_else(month(DateTime_Start) %in% 5:10, 'Wet', 'Dry')), # wet season from May (05) to October (10), https://doi.org/10.51847/8Wz28ID8Mn
+         Transect_Length = as.numeric(transect_length), 
+         Project = as.factor(Project)) # %>% select(-transect_length) 
+
+deploy_cam_visit_occu <- deploy_cam_visit_occu %>% ungroup()%>% 
+  mutate(Project = as.factor(Project), 
+         Julian_Date_Start = yday(Visit_start), 
+         Season = as.factor(if_else(month(Visit_start) %in% 5:10, 'Wet', 'Dry')),
+         Trapping_Days = as.numeric(Visit_length)) # %>% select(-Visit_length) 
+
 
 # extract det.covs data
-names(transect_grid)
-det.variables.transect <- c('Project', 'DateTime_Start', 'transect_length') # fill in all variables that are interesting
+names(locs_transects)
+det.variables.transect <- c('Project', 'Julian_Date_Start', 'Transect_Length') # fill in all variables that are interesting
 det.covs.transect <- list()
 for(det.var in det.variables.transect){
-  dat <- transect_grid %>% ungroup() %>% 
+  dat <- locs_transects %>% st_drop_geometry() %>%
+    ungroup() %>% 
     select(CellID, Cell_visit, !!sym(det.var)) %>% 
     pivot_wider(names_from = Cell_visit, names_prefix = 'Visit_',
                 values_from = !!sym(det.var))
-  det.covs.transect[[det.var]] <- dat
+  det.covs.transect[[det.var]] <- dat[,2:ncol(dat)] # dat # for troubleshooting use solely dat to keep CellID
   rm(dat)
 }
 
 names(deploy_cam_visit_occu)
-det.variables.camera <- c('Project', 'Visit_start', 'Visit_length') # fill in all variables which could be interesting
+det.variables.camera <- c('Project', 'Visit_start', 'Trapping_Days') # fill in all variables which could be interesting
 det.covs.camera <- list()
 for(det.var in det.variables.camera){
   dat <- deploy_cam_visit_occu %>% ungroup() %>% 
     select(CellID, Cell_visit, !!sym(det.var)) %>% 
     pivot_wider(names_from = Cell_visit, names_prefix = 'Visit_',
                 values_from = !!sym(det.var))
-  det.covs.camera[[det.var]] <- dat
+  det.covs.camera[[det.var]] <- dat[,2:ncol(dat)] # dat # for troubleshooting use solely dat to keep CellID
   rm(dat)
 }
 
+# bind det.covs for both camera trapping and transect data together in one list 
 det.covs <- list(det.covs.transect, det.covs.camera)
+det.covs
 
-# extract environmental site covariates, in spOccupancy calles occ.covs 
-sites.transect <- unique(transect_grid$CellID) # fill in here also the camera site Grid cells 
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+###### 5.2 Occ Covs ######
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# these are environmental covariates, in spOccupancy called occ.covs 
+
+# for transect data 
+sites.transect <- unique(locs_transects$CellID) 
 occ.covs.transect <- envCovs %>% 
   filter(CellID %in% sites.transect) %>% 
   arrange(CellID)
 
-sites.camera <- unique(deploy_cam_visit_occu$CellID)
+# for camera data 
+sites.camera <- unique(deploy_cam_visit_occu$CellID) # there is an NA, and I assume that because of the one location with lies outside the study area
 occ.covs.camera <- envCovs %>% 
 filter(CellID %in% sites.camera) %>% 
   arrange(CellID)
 
 occ.covs <- bind_rows(occ.covs.transect, occ.covs.camera)
+occ.covs
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+###### 5.3 Presence-absence data as y ######
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 # extract occu data as y 
-y.transect <- transect_grid %>% ungroup() %>% 
+y.transect <- locs_transects %>% 
+  ungroup() %>% 
+  st_drop_geometry() %>%
   select(CellID, Cell_visit, Occu) %>% 
   pivot_wider(names_from = Cell_visit, names_prefix = 'Visit_',
-              values_from = Occu)
+              values_from = Occu) %>% 
+  select(-CellID) # keep CellID for troubleshooting
 
 y.camera <- deploy_cam_visit_occu %>% ungroup() %>% 
   select(CellID, Cell_visit, Occu) %>% 
   pivot_wider(names_from = Cell_visit, names_prefix = 'Visit_',
-              values_from = Occu)
+              values_from = Occu) %>% 
+  select(-CellID) # keep CellID for troubleshooting
 
 y <- list(y.transect, y.camera)
+y
 
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+###### 5.4 Create site data to ensure proper linkage between data sets ######
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 # get sites of each data source
 sites.transect.ind <- 1:length(sites.transect)
 sites.camera.ind <- (max(sites.transect.ind)+1):(max(sites.transect.ind)+length(sites.camera)+1)
 sites <- list(sites.transect.ind, sites.camera.ind)
+sites
 
+# calc n.sites
+n.sites.camera <- length(sites.camera)
+n.sites.transect <- length(sites.transect)
+n.sites <- n.sites.camera + n.sites.transect
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-##### 3. bring all data together ######
+###### 5.5. Bring all data together ######
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# check data 
+sites
+occ.covs
+y
+det.covs
 
 # create data list which holds all data needed to run the model
 data.list <- list(occ.covs, det.covs, y, sites)
-names(data) <- c('occ.covs', 'det.covs', 'y', 'sites')
+names(data.list) <- c('occ.covs', 'det.covs', 'y', 'sites') # name data.list corresponding to the requirements if spOccupancy::intPGOcc
 
-# set parameters for model 
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##### 6. Set parameters for integrated occupancy model using spOccupancy::intPGOcc ######
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# alpha corresponds to 
+
+
+# set inits, alpha - det.covs, z for 
 inits.list <- list(alpha = list(0, 0, 0, 0), # list with each tag corresponding to a parameter name 
                    beta = 0, 
                    #sigma.sq.psi, for random effects in the occurence model
                    #sigma.sq.p, # for random effects in the det model 
-                   z = rep(1, J)) 
+                   z = rep(1, n.sites)) # z is for latent variable (here occupancy), start with 1
+
+inits <- list(
+  z = some_initial_values,            # Latent occupancy states
+  beta = some_initial_values,         # Covariate effects on occupancy
+  alpha = list(source1 = val1, source2 = val2, ...),  # Detection parameters per data source
+  sigma.sq.psi = some_initial_value,  # Variance for random effects in occupancy (if used)
+  sigma.sq.p = some_initial_value,    # Variance for random effects in detection (if used)
+  fix = TRUE                          # (Optional) Whether to fix starting values across chains
+)
+
+
+
+# set priors 
 priors.list <- list(beta.normal = list(mean = 0, var = 2.72), 
                     alpha.normal = list(mean = list(0, 0, 0, 0), 
                                         var = list(2.72, 2.72, 2.72, 2.72)))

@@ -176,21 +176,21 @@ locs_transects <- locs_transects %>%
 
 # calculate a few det covariates, improve season by assigning the season where the majority was surveyed
 locs_transects <- locs_transects %>% ungroup() %>%
-  mutate(Julian_Date_Start = lubridate::yday(DateTime_Start), # improve by taking a mean date?
-         Season = as.factor(if_else(month(DateTime_Start) %in% 5:10, 'Wet', 'Dry')), # wet season from May (05) to October (10), https://doi.org/10.51847/8Wz28ID8Mn
+  mutate(Julian_Date_Start_Transect = lubridate::yday(DateTime_Start), # improve by taking a mean date?
+         Season_Transect= as.factor(if_else(month(DateTime_Start) %in% 5:10, 'Wet', 'Dry')), # wet season from May (05) to October (10), https://doi.org/10.51847/8Wz28ID8Mn
          Transect_Length = as.numeric(transect_length), 
-         Project = as.factor(Project)) # %>% select(-transect_length) 
+         Project_Transect = as.factor(Project)) # %>% select(-transect_length) 
 
 deploy_cam_visit_occu <- deploy_cam_visit_occu %>% ungroup()%>% 
-  mutate(Project = as.factor(Project), 
-         Julian_Date_Start = yday(Visit_start), 
-         Season = as.factor(if_else(month(Visit_start) %in% 5:10, 'Wet', 'Dry')),
+  mutate(Project_Camera = as.factor(Project), 
+         Julian_Date_Start_Camera = yday(Visit_start), 
+         Season_Camera = as.factor(if_else(month(Visit_start) %in% 5:10, 'Wet', 'Dry')),
          Trapping_Days = as.numeric(Visit_length)) # %>% select(-Visit_length) 
 
 
 # extract det.covs data
 names(locs_transects)
-det.variables.transect <- c('Project', 'Julian_Date_Start', 'Transect_Length') # fill in all variables that are interesting
+det.variables.transect <- c('Project_Transect', 'Julian_Date_Start_Transect', 'Transect_Length', 'Season_Transect') # fill in all variables that are interesting
 det.covs.transect <- list()
 for(det.var in det.variables.transect){
   dat <- locs_transects %>% st_drop_geometry() %>%
@@ -203,7 +203,7 @@ for(det.var in det.variables.transect){
 }
 
 names(deploy_cam_visit_occu)
-det.variables.camera <- c('Project', 'Visit_start', 'Trapping_Days') # fill in all variables which could be interesting
+det.variables.camera <- c('Project_Camera', 'Julian_Date_Start_Camera', 'Trapping_Days', 'Season_Camera') # fill in all variables which could be interesting
 det.covs.camera <- list()
 for(det.var in det.variables.camera){
   dat <- deploy_cam_visit_occu %>% ungroup() %>% 
@@ -267,7 +267,7 @@ y
 
 # get sites of each data source
 sites.transect.ind <- 1:length(sites.transect)
-sites.camera.ind <- (max(sites.transect.ind)+1):(max(sites.transect.ind)+length(sites.camera)+1)
+sites.camera.ind <- (max(sites.transect.ind)+1):(max(sites.transect.ind)+length(sites.camera))
 sites <- list(sites.transect.ind, sites.camera.ind)
 sites
 
@@ -298,48 +298,38 @@ names(data.list) <- c('occ.covs', 'det.covs', 'y', 'sites') # name data.list cor
 
 
 # set inits, alpha - det.covs, z for 
-inits.list <- list(alpha = list(0, 0, 0, 0), # list with each tag corresponding to a parameter name 
-                   beta = 0, 
+inits.list <- list(alpha = list(transect = rep(0, length(det.covs.transect)+1), # alpha gives initial values for det with each a list per data source, which hosts a vec with length of n() of predictors for this data source
+                                camera = rep(0, 17)), # choose 0 as initial value
+                   beta = rep(0, 1), # for ecological state model, start occupancy covariates at 0, length is the number of occu covs (n.occ.covs)
                    #sigma.sq.psi, for random effects in the occurence model
                    #sigma.sq.p, # for random effects in the det model 
-                   z = rep(1, n.sites)) # z is for latent variable (here occupancy), start with 1
-
-inits <- list(
-  z = some_initial_values,            # Latent occupancy states
-  beta = some_initial_values,         # Covariate effects on occupancy
-  alpha = list(source1 = val1, source2 = val2, ...),  # Detection parameters per data source
-  sigma.sq.psi = some_initial_value,  # Variance for random effects in occupancy (if used)
-  sigma.sq.p = some_initial_value,    # Variance for random effects in detection (if used)
-  fix = TRUE                          # (Optional) Whether to fix starting values across chains
-)
-
-
+                   z = rep(1, n.sites)) # z is for latent variable (here occupancy), start with 1 for all sites occupied
 
 # set priors 
-priors.list <- list(beta.normal = list(mean = 0, var = 2.72), 
-                    alpha.normal = list(mean = list(0, 0, 0, 0), 
-                                        var = list(2.72, 2.72, 2.72, 2.72)))
-n.samples <- 5000
+priors.list <- list(beta.normal = list(mean = 0, var = 2.72), # priors for beta, the ecological state model (occu) given in a list where two vectors are given, first for mean and second for variance, if they are all the same, only one value per tag
+                    alpha.normal = list(mean = list(0, 0), 
+                                        var = list(2.72, 2.72)))
+n.samples <- 70000
 
 # call model 
 out <- intPGOcc(occ.formula = ~ 1, #occ.cov, 
-                det.formula = list(f.1 = ~ 1 # det.cov.1.1, 
-                                   f.2 = ~ 1), #det.cov.2.1), 
+                det.formula = list(transect = ~ Julian_Date_Start_Transect + Transect_Length + Project_Transect + Season_Transect, 
+                                   camera = ~ Julian_Date_Start_Camera + Trapping_Days + Project_Camera + Season_Camera), 
                 data = data.list,
                 inits = inits.list,
                 n.samples = n.samples, 
-                priors = prior.list, 
+                priors = priors.list, 
                 n.omp.threads = 1, 
                 verbose = TRUE, 
                 n.report = 1000, 
-                n.burn = 1000, 
-                n.thin = 1, 
-                n.chains = 1)
+                n.burn = 20000, 
+                n.thin = 1, # no thinning
+                n.chains = 3)
 
 
 
 
-
+summary(out)
 
 
 

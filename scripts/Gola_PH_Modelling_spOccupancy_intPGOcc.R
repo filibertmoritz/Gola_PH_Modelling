@@ -294,9 +294,6 @@ names(data.list) <- c('occ.covs', 'det.covs', 'y', 'sites') # name data.list cor
 ##### 6. Set parameters for integrated occupancy model using spOccupancy::intPGOcc ######
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-# alpha corresponds to 
-
-
 # set inits, alpha - det.covs, z for 
 inits.list <- list(alpha = list(transect = rep(0, length(det.covs.transect)+1), # alpha gives initial values for det with each a list per data source, which hosts a vec with length of n() of predictors for this data source
                                 camera = rep(0, 17)), # choose 0 as initial value
@@ -309,7 +306,7 @@ inits.list <- list(alpha = list(transect = rep(0, length(det.covs.transect)+1), 
 priors.list <- list(beta.normal = list(mean = 0, var = 2.72), # priors for beta, the ecological state model (occu) given in a list where two vectors are given, first for mean and second for variance, if they are all the same, only one value per tag
                     alpha.normal = list(mean = list(0, 0), 
                                         var = list(2.72, 2.72)))
-n.samples <- 70000
+n.samples <- 50000
 
 # call model 
 out <- intPGOcc(occ.formula = ~ 1, #occ.cov, 
@@ -319,58 +316,75 @@ out <- intPGOcc(occ.formula = ~ 1, #occ.cov,
                 inits = inits.list,
                 n.samples = n.samples, 
                 priors = priors.list, 
-                n.omp.threads = 1, 
+                n.omp.threads = 4, 
                 verbose = TRUE, 
                 n.report = 1000, 
                 n.burn = 20000, 
                 n.thin = 1, # no thinning
                 n.chains = 3)
 
+m1 <- intPGOcc(occ.formula = ~ scale(river_density_med_large) + scale(Distance_large_river) + scale(mean_elev) + 
+                 scale(JRC_transition_Degraded_forest_short_duration_disturbance_after_2014) + scale(JRC_transition_Undisturbed_tropical_moist_forest), #occ.cov, 
+               det.formula = list(transect = ~ scale(Julian_Date_Start_Transect) + scale(Transect_Length) + Project_Transect + Season_Transect, 
+                                  camera = ~ scale(Julian_Date_Start_Camera) + scale(Trapping_Days) + Project_Camera + Season_Camera), 
+               data = data.list,
+               inits = inits.list,
+               n.samples = n.samples, 
+               priors = priors.list, 
+               n.omp.threads = 5, 
+               verbose = TRUE, 
+               n.report = 1000, 
+               n.burn = 20000, 
+               n.thin = 1, # no thinning
+               n.chains = 3)
+
+# access model 
+summary(m1)
+# plot(m1, param = 'alpha')
+pcc_m1 <- ppcOcc(m1, fit.stat = 'chi-squared', group = 1) # performs posterior predictive checks 
+summary(pcc_m1)
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##### 7. Predict ######
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# create model matrix
+X.0 <- model.matrix(~ scale(river_density_med_large) + scale(Distance_large_river) + 
+                      scale(mean_elev) + scale(JRC_transition_Degraded_forest_short_duration_disturbance_after_2014) + 
+                      scale(JRC_transition_Undisturbed_tropical_moist_forest), 
+                    data = envCovs_sf)
+
+# predict 
+pred_m1 <- predict(m1, type = 'occupancy', ignore.RE = T, X.0 = X.0)
+
+# summarise prediction 
+psi.hat.quants <- apply(pred_m1$psi.0.samples, 2, quantile, c(0.025, 0.5, 0.975))
+
+# create a df for plotting 
+plot_m1 <- as.data.frame(t(psi.hat.quants)) %>% 
+  mutate(CellID = row_number()) %>% 
+  rename(pred_mean = `50%`, pred_CI_lower = `2.5%`, pred_CI_upper = `97.5%`)
+
+# create sf
+plot_m1_sf <- envCovs_sf %>% left_join(plot_m1, join_by(CellID))
+
+# plot prediction on map
+tm_shape(plot_m1_sf) +
+  tm_polygons(fill = 'pred_mean')
 
 
+# fancier plot
+library(ggspatial)
+ggplot(data = plot_m1_sf) +
+  annotation_map_tile(zoom = 10, type = 'cartolight') +
+  geom_sf(aes(fill = pred_mean), color = NA, alpha = 0.5) +  # Use pred_mean for fill color
+  scale_fill_viridis_c(option = "viridis", name = "Predicted Mean Occupancy") + # scale_fill_viridis_c(option = "magma"), or replace "magma" with "inferno", "plasma", "cividis", 
+  theme_minimal() +
+  theme(legend.position = "right", 
+        panel.border = element_rect(color = "darkgrey", fill = NA, linewidth = 1), # add frame
+        axis.line = element_blank()) +
+  labs(title = "Predicted Pygmy Hippo Occupancy Probability", 
+       subtitle = "Based on an Integrated Occupancy Model fitted in spOccupancy", 
+       x = 'Longitude', y = 'Latutude')
+#ggsave(filename = 'output/plots/PH_hotspot_map_all_data.jpg', plot = hotspot_map, height = 6, width = 12)
 
-summary(out)
-
-
-
-
-
-
-
-
-
-plot(locs_transects_visit_occu)
-class(locs_transects_visit_occu)
-
-# prepare opportunistic presences as sf
-# head(pres_opp)
-# str(pres_opp)
-# pres_opp <- pres_opp %>% 
-#   rename(UTM_X_meters = UTM_X_m, UTM_Y_meters = UTM_Y_m) %>% 
-#   mutate(Obs_Method = 'Opportunistic') %>%
-#   select(Project, Country, Obs_DateTime, UTM_X_meters, UTM_Y_meters, Sign, Obs_Method) 
-
-# prepare transect presences as sf
-pres_transects <- pres_transects %>% 
-  mutate(Country = 'SierraLeone', 
-         Obs_Method = 'Transect Survey')
-
-# prepare camera trap presences as sf
-head(pres_cam)
-pres_cam <- pres_cam %>% mutate(Obs_Method = 'Camera Trap') %>% 
-  select(Project, Country, Obs_DateTime, UTM_X_meters , UTM_Y_meters, SiteID, Obs_Method)
-
-# merge data together 
-pres_sf <- bind_rows(pres_cam, pres_opp,
-                     pres_transects) %>% 
-  st_as_sf(coords = c('UTM_X_meters', 'UTM_Y_meters'), remove = F, crs = 32629)
-
-
-head(hb.dat)
-
-
-######
-## data for spOccupancy has to be in a 3-dim array with dim corresponding to species (1), site (row), and replicate
-## site = row, replicated visits are columns, every value is either presence or absence 
-
-head(pres_transects)

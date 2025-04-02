@@ -306,22 +306,24 @@ inits.list <- list(alpha = list(transect = rep(0, length(det.covs.transect)+1), 
 priors.list <- list(beta.normal = list(mean = 0, var = 2.72), # priors for beta, the ecological state model (occu) given in a list where two vectors are given, first for mean and second for variance, if they are all the same, only one value per tag
                     alpha.normal = list(mean = list(0, 0), 
                                         var = list(2.72, 2.72)))
-n.samples <- 50000
+n.samples <- 10000
 
 # call model 
-out <- intPGOcc(occ.formula = ~ 1, #occ.cov, 
+out <- intPGOcc(occ.formula = ~ scale(river_density_med_large) + scale(Distance_large_river) + scale(mean_elev) + 
+                  scale(JRC_transition_Degraded_forest_short_duration_disturbance_after_2014) + scale(JRC_transition_Undisturbed_tropical_moist_forest), #occ.cov, 
                 det.formula = list(transect = ~ Julian_Date_Start_Transect + Transect_Length + Project_Transect + Season_Transect, 
                                    camera = ~ Julian_Date_Start_Camera + Trapping_Days + Project_Camera + Season_Camera), 
                 data = data.list,
                 inits = inits.list,
                 n.samples = n.samples, 
                 priors = priors.list, 
-                n.omp.threads = 4, 
+                n.omp.threads = 5, 
                 verbose = TRUE, 
                 n.report = 1000, 
-                n.burn = 20000, 
+                n.burn = 5000, 
                 n.thin = 1, # no thinning
                 n.chains = 3)
+summary(out)
 
 m1 <- intPGOcc(occ.formula = ~ scale(river_density_med_large) + scale(Distance_large_river) + scale(mean_elev) + 
                  scale(JRC_transition_Degraded_forest_short_duration_disturbance_after_2014) + scale(JRC_transition_Undisturbed_tropical_moist_forest), #occ.cov, 

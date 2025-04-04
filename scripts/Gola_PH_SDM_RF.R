@@ -400,7 +400,7 @@ viv_plot1 <- vivid::pdpPairs(data = traindata,
                 nmax = 100, # samples rows from data to display, NULL means all rows/observations, 50 is good choice for computation time 
                 gridSize = 13, # huge influence on computation time, set to 20 for higher resolution in pixel-plot
                 nIce = 100, # Number of ice curves to be plotted, defaults to 30.
-                vars = variables) # choose important variables here 
+                vars = variables[1:10]) # choose important variables here 
 ggsave(filename = 'C:/Users/filib/Documents/Praktika/RSPB/Gola_PH_Modelling/output/plots/PH_RF_feature_influence_rf1_new.jpg', plot = viv_plot1, width = 20, height = 16)
 
 gc()
@@ -411,18 +411,18 @@ viv_plot2 <- vivid::pdpPairs(data = traindata,
                 nmax = 100, # samples rows from data to display, NULL means all rows/observations, 50 is good choice for computation time 
                 gridSize = 10, # huge influence on computation time, set to 20 for higher resolution in pixel-plot
                 nIce = 100, # Number of ice curves to be plotted, defaults to 30.
-                vars = variables2) # choose important variables here 
+                vars = variables2[1:10]) # choose important variables here 
 ggsave(filename = 'C:/Users/filib/Documents/Praktika/RSPB/Gola_PH_Modelling/output/plots/PH_RF_feature_influence_rf2_new.jpg', plot = viv_plot2, width = 20, height = 16)
 
 gc()
 variables3 <- names(sort(importance(rf3), decreasing = TRUE))
 viv_plot3 <- vivid::pdpPairs(data = traindata, 
-                fit = rf2, 
+                fit = rf3, 
                 response = 'Occu', 
                 nmax = 100, # samples rows from data to display, NULL means all rows/observations, 50 is good choice for computation time 
                 gridSize = 13, # huge influence on computation time, set to 20 for higher resolution in pixel-plot
                 nIce = 100, # Number of ice curves to be plotted, defaults to 30.
-                vars = variables3) # choose important variables here 
+                vars = variables3[1:10]) # choose important variables here 
 ggsave(filename = 'C:/Users/filib/Documents/Praktika/RSPB/Gola_PH_Modelling/output/plots/PH_RF_feature_influence_rf3_new.jpg', plot = viv_plot3, width = 20, height = 16)
 ?vivid::pdpVars()
 
@@ -450,7 +450,7 @@ viviHeatmap(mat = vivi(data = traindata, fit = rf1, response = 'Occu_Effort')) #
 
 # predict and store data in data frame 
 data$pred1 <- predict(rf1, data = data %>% st_drop_geometry())$predictions / max(traindata$Effort_manipulated)
-data$pred2 <- predict(rf2, data = data %>% st_drop_geometry() %>% mutate(Effort = max(Effort)))$predictions[,1]
+data$pred2 <- predict(rf2, data = data %>% st_drop_geometry() %>% mutate(Effort = max(Effort)))$predictions #[,1]
 data$pred3 <- predict(rf3, data = data %>% st_drop_geometry())$predictions
 
 # confusion matrix - doesn't work yet
@@ -508,7 +508,7 @@ raw<-ggplot(data) +
 # create an arranged plot which compares the different methods 
 library(ggpubr)
 ggarrange(opt1, opt2, opt3, raw)
-ggsave(filename = 'C:/Users/filib/Documents/Praktika/RSPB/Gola_PH_Modelling/output/plots/PH_RF_predictions_small_grid.jpg', plot = last_plot(), width = 15*2, height = 10*2)
+ggsave(filename = 'C:/Users/filib/Documents/Praktika/RSPB/Gola_PH_Modelling/output/plots/PH_RF_predictions_big_grid.jpg', plot = last_plot(), width = 15*2, height = 10*2)
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

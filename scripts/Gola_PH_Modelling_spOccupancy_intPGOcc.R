@@ -341,10 +341,37 @@ summary(m1) # Rhat looks pretty good, ESS always (mostly far) above 1000
 
 
 # produce posterior predictive checks, here using chi-square and freeman tukey - the results aren't very similar
-pcc_m1_chi <- ppcOcc(m1, fit.stat = 'chi-squared', group = 1) # group 1 - groups values by site, group 2 - groups values per replicate
-pcc_m1_ft <- ppcOcc(m1, fit.stat = 'freeman-tukey', group = 1)
-summary(pcc_m1_chi) # bayesian p-values are 0.135 and 0.69
-summary(pcc_m1_ft) # here bayesian p-values look much better, both ~0.27-0.28
+ppc_m1_chi <- ppcOcc(m1, fit.stat = 'chi-squared', group = 1) # group 1 - groups values by site, group 2 - groups values per replicate
+ppc_m1_ft <- ppcOcc(m1, fit.stat = 'freeman-tukey', group = 1)
+summary(ppc_m1_chi) # bayesian p-values are 0.135 and 0.69
+summary(ppc_m1_ft) # here bayesian p-values look much better, both ~0.27-0.28
+
+
+# produce a model check plot, code taken from https://doserlab.com/files/spoccupancy-web/articles/modelfitting
+# chi square stats
+ppc_m1_chi_df <- data.frame(fit = ppc_m1_chi$fit.y[[2]], 
+                            fit.rep = ppc_m1_chi$fit.y.rep[[2]], 
+                            color = 'lightskyblue1')
+ppc_m1_chi_df $color[ppc_m1_chi_df$fit.rep > ppc_m1_chi_df$fit] <- 'lightsalmon'
+plot(ppc_m1_chi_df$fit, ppc_m1_chi_df$fit.rep, bg = ppc_m1_chi_df$color, pch = 21, 
+     ylab = 'Fit', xlab = 'True')
+lines(ppc_m1_chi_df$fit, ppc_m1_chi_df$fit, col = 'black')
+# freeman tukey stats 
+ppc_m1_ft_df <- data.frame(fit = ppc_m1_ft$fit.y[[2]], 
+                            fit.rep = ppc_m1_ft$fit.y.rep[[2]], 
+                            color = 'lightskyblue1')
+ppc_m1_ft_df$color[ppc_m1_ft_df$fit.rep > ppc_m1_ft_df$fit] <- 'lightsalmon'
+plot(ppc_m1_ft_df$fit, ppc_m1_ft_df$fit.rep, bg = ppc_m1_ft_df$color, pch = 21, 
+     ylab = 'Fit', xlab = 'True')
+lines(ppc_m1_ft_df$fit, ppc_m1_ft_df$fit, col = 'black')
+
+# lets have a look if there are any very influential data points 
+diff_fit_chi <- ppc_m1_chi$fit.y.rep.group.quants[[1]][3, ] - ppc_m1_chi$fit.y.group.quants[[1]][3, ] # change list to 1 or 2, depending on transect or camera, respectively 
+plot(diff_fit_chi, pch = 19, xlab = 'Site ID', ylab = 'Replicate - True Discrepancy')
+
+diff_fit_ft <- ppc_m1_ft$fit.y.rep.group.quants[[2]][3, ] - ppc_m1_ft$fit.y.group.quants[[2]][3, ] # change list to 1 or 2, depending on transect or camera, respectively 
+plot(diff_fit_ft, pch = 19, xlab = 'Site ID', ylab = 'Replicate - True Discrepancy')
+
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ##### 7. Visualise effect sizes ######

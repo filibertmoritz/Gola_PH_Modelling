@@ -46,7 +46,9 @@ JRC_DEGRAD <- terra::rast(raster::raster(x = paste0(path, '/JRC_TMF_DegradationY
 JRC_ANN_CHANGE <- terra::rast(x = paste0(path, '/JRC_TMF_AnnualChanges2021_GGL.tif'))
 
 # immediately throw away the stuff which isn't needed
-JRC_ANN_CHANGE <- JRC_ANN_CHANGE[[c('Dec2021')]] # here select the year that is needed, but then also change it in the if else statement, I think data is only available until Dez2021
+JRC_ANN_CHANGE_2013 <- JRC_ANN_CHANGE[[c('Dec2013')]] # here select the year that is needed, but then also change it in the if else statement, I think data is only available until Dez2021
+JRC_ANN_CHANGE_2021 <- JRC_ANN_CHANGE[[c('Dec2021')]] # here select the year that is needed, but then also change it in the if else statement, I think data is only available until Dez2021
+rm(JRC_ANN_CHANGE)
 VEG_2013 <-  VEG_2013[[c('"250m 16 days NDVI"', '"250m 16 days EVI"')]]
 VEG_2020 <-  VEG_2020[[c('"250m 16 days NDVI"', '"250m 16 days EVI"')]]
 
@@ -54,6 +56,7 @@ VEG_2020 <-  VEG_2020[[c('"250m 16 days NDVI"', '"250m 16 days EVI"')]]
 rivers <- st_read('C:/Users/filib/Documents/Praktika/RSPB/data/spatialdata/Gola_rivers.shp')
 study_area <- st_read('C:/Users/filib/Documents/Praktika/RSPB/data/spatialdata/Gola_PH_study_area.shp')
 settlements <- st_read('C:/Users/filib/Documents/Praktika/RSPB/data/spatialdata/Settlements_2021_Points.shp')
+reserves <- st_read('C:/Users/filib/Documents/Praktika/RSPB/data/spatialdata/Greater_Gola_Landscape_2024_polygons.shp')
 # roads <- st_read()
 
 
@@ -67,7 +70,7 @@ target_crs <- crs('EPSG:32629') # set target crs
 for(i in 1:length(spat_rasters)){ # loop over all spatRasters and project to new crs 
     raster <- get(spat_rasters[i])  # get raster from 
     if(crs(raster) != target_crs){
-      if(names(raster)[1] == "TransitionClass" | names(raster)[1] == "DegradationYear" | names(raster)[1] == "Dec2021"){ # change Dez2021 here if needed
+      if(names(raster)[1] == "TransitionClass" | names(raster)[1] == "DegradationYear" | names(raster)[1] == "Dec2021"| names(raster)[1] == "Dec2013"){ # change Dez2021 here if needed
         raster <- terra::project(raster, target_crs, , method = 'near')  # project to new crs using terra which is rather slow and appropriate handling for classes
         assign(spat_rasters[i], raster, envir = .GlobalEnv)  # save to global environment again
         message(spat_rasters[i], " has been projected to target crs.")
@@ -96,7 +99,7 @@ for(i in 1:length(spat_vectors)){ # loop over all spatVectors and project to new
 }
 
 # save all projected spatial data as Rdata to not have to do all this again and again
-save(DTM, JRC_ANN_CHANGE, JRC_DEGRAD, JRC_TRANSITION, LANDCOVER_2021, LANDCOVER_2023, 
+save(DTM, JRC_ANN_CHANGE_2013, JRC_ANN_CHANGE_2021, JRC_DEGRAD, JRC_TRANSITION, LANDCOVER_2021, LANDCOVER_2023, 
      LANDCOVER_2021, rivers, settlements, SLOPE, study_area, VEG_2013, VEG_2020, file = 'data/PH_projected_spatial_data.Rdata')
 
 
@@ -104,14 +107,14 @@ save(DTM, JRC_ANN_CHANGE, JRC_DEGRAD, JRC_TRANSITION, LANDCOVER_2021, LANDCOVER_
 ##### 4. Create a grid and buffered study area##########
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-# create grid, for 2km2 choose 1518 as cellsize, 500 is rather small, nearly breakes my laptop
-grid_sf <- st_make_grid(study_area, cellsize = 1518, square = F) %>% # creates a st object, for squares: square = T, F is polygons - here make sure that we create the appropriate grid cell size!
+# create grid, for 2km2 choose 1519 as cellsize, 500 is rather small, nearly breakes my laptop
+grid_sf <- st_make_grid(study_area, cellsize = 1519.671, square = F) %>% # creates a st object, for squares: square = T, F is polygons - here make sure that we create the appropriate grid cell size!
   st_as_sf() %>% # store as sf object 
   st_filter(study_area, .predicate = st_intersects) %>% # filter all polygons that lie within or touch the study area
   mutate(CellID = row_number())
 
 # create points in the center of each grid cell
-grid_point_sf <- st_make_grid(study_area, cellsize = 1518, square = F, what = 'centers') %>% # make sure that cellsize is the same as above!
+grid_point_sf <- st_make_grid(study_area, cellsize = 1519.671, square = F, what = 'centers') %>% # make sure that cellsize is the same as above!
   st_as_sf() %>% # store as sf object 
   st_filter(grid_sf, .predicate = st_intersects) %>% # filter all polygons that lie within or touch the study area
   mutate(CellID = row_number())
@@ -204,28 +207,30 @@ JRC_transition_stats <- JRC_transition_stats %>% select(CellID, JRC_transition_U
                                 JRC_transition_Degraded_forest_long_duration_disturbance_after_2014, JRC_transition_Degraded_forest_2_3_degradation_periods_before_2014, 
                                 JRC_transition_Degraded_forest_2_3_degradation_periods_after_2014, JRC_transition_Regrowth_desturbed_between_2004_2013, JRC_transition_Regrowth_desturbed_between_2014_2020)
 
-# extract data from JRC_DEGRAD, omitted for now since I daubt this is needed!
+# extract data from JRC_DEGRAD, omitted for now since I daut this is needed!
 # unique(JRC_DEGRAD) # this raster has only one value per cell , possibly it gives the year of degradation for the first time?
 # hist(as.data.frame(JRC_DEGRAD)$DegradationYear)
 # plot(ifel(JRC_DEGRAD != 0, 1, 0))
 
 # improve data structure from JRC_ANN_CHANGE - extracted data for Dec2021 which then has values from 1 to 6, legend in https://forobs.jrc.ec.europa.eu/static/tmf/TMF_DataUsersGuide.pdf
-JRC_ANN_CHANGE <- as.factor(JRC_ANN_CHANGE)
-change_names <- data.frame(ID = 1:nrow(levels(JRC_ANN_CHANGE)[[1]]), 
+JRC_ANN_CHANGE_2013 <- as.factor(JRC_ANN_CHANGE_2013)
+JRC_ANN_CHANGE_2021 <- as.factor(JRC_ANN_CHANGE_2021)
+change_names <- data.frame(ID = 1:nrow(levels(JRC_ANN_CHANGE_2013)[[1]]), 
                            label = c('Undisturbed_tropical_moist_forest', 
                                      'Degraded_tropical_moist_forest', 
                                      'Deforested_land', 
                                      'Tropical_moist_forest_regrowth', 
                                      'Permanent_and_seasonal_water', 
                                      'Other_land_cover'))
-levels(JRC_ANN_CHANGE)[[1]] <- change_names 
-
+levels(JRC_ANN_CHANGE_2013)[[1]] <- change_names %>% mutate(label = paste(change_names$label, 'Dec2013', sep = '_'))
+levels(JRC_ANN_CHANGE_2021)[[1]] <- change_names %>% mutate(label = paste(change_names$label, 'Dec2021', sep = '_'))
 # extract data from JRC_ANN_CHANGE, which are basically rather broad land cover classes!
-plot(JRC_ANN_CHANGE)
-JRC_ann_changes_stats <- exactextractr::exact_extract(JRC_ANN_CHANGE, grid_sf, fun = 'weighted_frac', weights = 'area', append_cols = 'CellID')
-names(JRC_ann_changes_stats) <- c('CellID', paste0('JRC_ann_changes_2021', change_names$label))
+plot(JRC_ANN_CHANGE_2021); plot(JRC_ANN_CHANGE_2013)
+JRC_ann_changes_2013_stats <- exactextractr::exact_extract(JRC_ANN_CHANGE_2013, grid_sf, fun = 'weighted_frac', weights = 'area', append_cols = 'CellID')
+JRC_ann_changes_2021_stats <- exactextractr::exact_extract(JRC_ANN_CHANGE_2021, grid_sf, fun = 'weighted_frac', weights = 'area', append_cols = 'CellID')
+names(JRC_ann_changes_2013_stats) <- c('CellID', paste('JRC_ann_changes', change_names$label, 'Dec2013', sep = '_'))
+names(JRC_ann_changes_2021_stats) <- c('CellID', paste('JRC_ann_changes', change_names$label, 'Dec2021', sep = '_'))
 
-# extract data from JRC_TRANSITION
 
 # join data to grid_sf
 grid_sf <- grid_sf %>% 
@@ -233,7 +238,8 @@ grid_sf <- grid_sf %>%
   # left_join(landcover_23_stats, join_by(CellID)) %>% 
   left_join(veg_13, join_by(CellID)) %>% 
   left_join(veg_20, join_by(CellID)) %>% 
-  left_join(JRC_ann_changes_stats, join_by(CellID)) %>% 
+  left_join(JRC_ann_changes_2013_stats, join_by(CellID)) %>% 
+  left_join(JRC_ann_changes_2021_stats, join_by(CellID)) %>% 
   left_join(JRC_transition_stats, join_by(CellID)) %>%
   mutate(mean_elev = elev_mean, 
          mean_slope = slope_mean)
@@ -261,6 +267,7 @@ grid_sf <- grid_sf %>% left_join(river_length_med_large, join_by(CellID)) %>%
   replace(is.na(.), 0) %>% select(-river_length_med_large) # NA results from grid cells without rivers
 
 
+
 # distance to settlement, to large river
 dist_settle <- st_distance(grid_sf, settlements, which = 'Euclidean') %>% # gives a distance matrix
   apply(1, min) 
@@ -270,7 +277,48 @@ grid_sf <- grid_sf %>% mutate(Distance_settlement = set_units(dist_settle, m),
                               Distance_large_river = set_units(dist_large_river, m)) 
 
 
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+###############################################################################
+##### CONTINUE HERE TO CREATE A LEAKAGE BELT ##################################
+###############################################################################
+
+# location in forest reserve, national park, community forest or outside 
+reserves <- reserves %>% rename(Name = NAME, Reserve_Type = DESIG) %>% 
+  filter(Name %in% c('Gola North', 'Gola South', 'Gola Central', 'Bunumbu', 'Tiwai Island Sanctuary', 'Kambui South', 'Kambui Hills and Extensions')) %>% 
+  select(Name, Reserve_Type) # clean shp file up 
+reserves_buffered <- vect(st_buffer(reserves %>% filter(Name %in% c('Gola North', 'Gola South', 'Gola Central')), dist = 4000))
+
+str(reserves_buffered)
+reserves_buffered <- terra::union(reserves_buffered)
+reserves_buffered
+
+plot(reserves_buffered)
+  st_union()  %>% st_cast('POLYGON')
+  
+  st_difference(reserves) %>% st_cast('POLYGON')
+test[[1]]
+st_geometry_type(test)
+plot(st_geometry(test))
+plot(st_geometry(test[[7]]))
+
+location <- st_intersection(reserves, grid_sf) %>% select(CellID, Reserve_Type) %>% 
+  mutate(area = set_units(st_area(.), km^2))%>% 
+  group_by(CellID, Reserve_Type) %>% 
+  summarise(sum_area = sum(area)) %>% 
+  group_by(CellID) %>%
+  slice_max(sum_area, n = 1) # this removes the reserve types which are not dominant / have the most area in a grid cell
+
+grid_sf <- grid_sf %>% left_join(location %>% st_drop_geometry() %>% select(Reserve_Type), join_by(CellID)) %>% 
+  mutate(if_else(is.na(Reserve_Type), 'Outside', Reserve_Type))
+  
+library(tmap)
+tm_shape(reserves) +
+  tm_polygons()
+
+################################################################################
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ##### 8. Save full set of environmental covariates as shp #####
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

@@ -80,12 +80,6 @@ deploy_cam_visit_occu <- deploy_cam_visit %>% st_drop_geometry() %>%
 deploy_cam_visit_occu <- deploy_cam_visit_occu %>% filter(!is.na(CellID )) # this filters out one camera trap which lies outside the study area
 deploy_cam_visit <- deploy_cam_visit %>% filter(!is.na(CellID))
 
-# quick plot
-tm_shape(grid_sf) +
-  tm_polygons()+
-tm_shape(deploy_cam_visit) +
-  tm_dots(fill = 'red', size = 0.5)
-
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ##### 4. Prepare transect survey data   #####
@@ -109,18 +103,19 @@ locs_transects <- locs_transects %>%
   group_by(uniqueID,CellID,subtransect) %>% 
   mutate(transect_length = st_length(geometry, which = 'Euclidean'))
 
-# plot result  
-tmap_mode("view")  # interactive mode
-tm_shape(grid_sf) +
-  tm_polygons(fill = tm_const()) + 
-tm_shape(locs_transects) + 
-  tm_lines(col = 'subtransect', lwd = 1.5, id = 'uniqueID') 
+# make a plot to check if everything worked 
+# tmap_mode("view")  # interactive mode
+# tm_shape(grid_sf) +
+#   tm_polygons(fill = tm_const()) + 
+# tm_shape(locs_transects) + 
+#   tm_lines(col = 'subtransect', lwd = 1.5, id = 'uniqueID') 
 
-# link the presences to the subtransects 
+# create a sf object 
 pres_transects_sf <- pres_transects %>% 
   st_as_sf(coords = c('UTM_X_meters', 'UTM_Y_meters'), remove = F, crs = 32629) %>% 
   st_transform(crs = 32629)
 
+# link the presences to the subtransects, this is a bit ugly but the best way I could find to do this 
 unique_ID <- unique(locs_transects$uniqueID) # get uniqueIDs for each transect
 joined_pres <- st_join(pres_transects_sf %>% filter(uniqueID == unique_ID[1]), # create df to store data with first iteration
                        locs_transects %>% filter(uniqueID == unique_ID[1]) %>% select(subtransect, CellID), 
@@ -134,13 +129,13 @@ for(i in 2:length(unique_ID)) { # loop over all other IDs
 pres_transects_sf <- joined_pres
 rm(joined_pres)
 
-# check, that everything went okay 
-tm_shape(grid_sf) +
-  tm_polygons() +
-tm_shape(locs_transects) + 
-  tm_lines(col='subtransect', lwd = 2, palette=c("blue", "darkgreen", "red", "lightblue", 'orange', 'purple')) +
-tm_shape(pres_transects_sf) +
-  tm_dots(col='subtransect', palette=c("blue", "darkgreen", "red", "lightblue", 'orange', 'purple'), size=0.5)
+# make a plot to check, that everything went okay - there should be subtransects 
+# tm_shape(grid_sf) +
+#   tm_polygons() +
+# tm_shape(locs_transects) + 
+#   tm_lines(col='subtransect', lwd = 2, palette=c("blue", "darkgreen", "red", "lightblue", 'orange', 'purple')) +
+# tm_shape(pres_transects_sf) +
+#   tm_dots(col='subtransect', palette=c("blue", "darkgreen", "red", "lightblue", 'orange', 'purple'), size=0.5)
 
 # add presence absence information to locs transect df
 occu_transects <- pres_transects_sf  %>% 
@@ -161,42 +156,47 @@ locs_transects <- locs_transects %>%
 ##### 5. Bring data together for spOccupancy ######
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-# transfer transect data into grid
-# transect_grid <- grid_sf %>% 
-#   left_join(locs_transects %>% st_drop_geometry(), join_by(CellID)) %>%
-#   group_by(CellID) %>% 
-#   mutate(Cell_visit = row_number()) %>% 
-#   st_drop_geometry() %>% 
-#   drop_na(Occu)
-
-
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ###### 5.1 Det Covs ######
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 # calculate a few det covariates, improve season by assigning the season where the majority was surveyed
 locs_transects <- locs_transects %>% ungroup() %>%
-  mutate(Julian_Date_Start_Transect = lubridate::yday(DateTime_Start), # improve by taking a mean date?
-         Year_Transect = as.numeric(year(DateTime_Start)), # survey year coded as numeric or factor
-         Season_Transect= as.factor(if_else(month(DateTime_Start) %in% 5:10, 'Wet', 'Dry')), # wet season from May (05) to October (10), https://doi.org/10.51847/8Wz28ID8Mn
-         Transect_Length = as.numeric(transect_length), 
-         Project_Transect = as.factor(Project))  # %>% select(-transect_length) 
-locs_transects_scaled <- locs_transects %>% mutate(across(c(Year_Transect, Julian_Date_Start_Transect, Transect_Length), ~ scale(.) %>% as.vector())) # scale numeric variables
+  mutate(Date_Transect_unscaled = lubridate::yday(DateTime_Start), # Julian start date, improve by taking a mean date?
+         Year_Transect = as.factor(year(DateTime_Start)), # survey year coded as factor
+         Season_Transect = as.factor(if_else(month(DateTime_Start) %in% 5:10, 'Wet', 'Dry')), # wet season from May (05) to October (10), https://doi.org/10.51847/8Wz28ID8Mn
+         # Reserve_Type_Transect = as.ordered(), # add the protection status here 
+         Transect_Length_unscaled = as.numeric(transect_length), 
+         # Period_Transect = as.factor(if_else(year(DateTime_End) <= 2017, '2011-2017', '2018-2024')),
+         Project_Transect = as.factor(Project)) # %>% select(-transect_length) 
+locs_transects <- locs_transects %>% mutate(Year_Transect = as.numeric(scale(Year_Transect_unscaled)), # scale numeric variables
+                                            Date_Transect = as.numeric(scale(Date_Transect_unscaled)), 
+                                            Transect_Length = as.numeric(scale(Transect_Length_unscaled)))
 
 deploy_cam_visit_occu <- deploy_cam_visit_occu %>% ungroup()%>% 
   mutate(Project_Camera = as.factor(Project), 
-         Julian_Date_Start_Camera = yday(Visit_start), 
-         Year_Camera = as.numeric(year(Visit_start)), # survey year coded as numeric or factor?
+         Project_lumped_Camera = as.factor(case_when(Project %in% c('BasalZoo_2024','Basel Zoo PygmyHippo 2018-2020') ~ 'BaselZoo', # fill a more meaningful categorisation in
+                                                     Project %in% c('REDD_SP1', 'REDD_SP2', 'REDD_SP3', 'REDD_SP4', 'Pygmy Hippo REDD CT 2019-2021','artp_p1', 'artp_p2', 'REDD_ARTP_PygmyHippo 2013-2014') ~ 'REDD_ARTP', 
+                                                     Project %in% c('Darwin19_22', 'Darwin_morroRiver', 'darwin_13_17') ~ 'Darwin', 
+                                                     Project %in% c('IWT_CF') ~ 'IWT')),
+         Date_Camera_unscaled = yday(Visit_start), 
+         # Reserve_Type_Camera = as.ordered(), # add the protection status here 
+         Year_Camera = as.factor(year(Visit_start)), # survey year coded as factor
          Season_Camera = as.factor(if_else(month(Visit_start) %in% 5:10, 'Wet', 'Dry')),
-         Trapping_Days = as.numeric(Visit_length)) # %>% select(-transect_length) # %>% select(-Visit_length) 
-deploy_cam_visit_occu_scaled <- deploy_cam_visit_occu %>% mutate(across(c(Year_Camera, Julian_Date_Start_Camera, Trapping_Days), ~ scale(.) %>% as.vector())) # scale numeric variables
+         # Period_Camera = as.factor(if_else(year(Visit_end) <= 2017, '2011-2017', '2018-2024')),
+         Trapping_Days_unscaled = as.numeric(Visit_length)) # %>% select(-transect_length) # %>% select(-Visit_length) 
+deploy_cam_visit_occu <- deploy_cam_visit_occu %>% mutate(Year_Camera = as.numeric(scale(Year_Camera_unscaled)), # scale numeric variables
+                                            Date_Camera = as.numeric(scale(Date_Camera_unscaled)), 
+                                            Trapping_Days = as.numeric(scale(Trapping_Days_unscaled)))
+
 
 # extract det.covs data
-names(locs_transects_scaled)
-det.variables.transect <- c('Project_Transect', 'Julian_Date_Start_Transect', 'Transect_Length', 'Season_Transect', 'Year_Transect') # fill in all variables that are interesting
+names(locs_transects) 
+det.variables.transect <- c('Project_Transect', 'Date_Transect', 'Date_Transect_unscaled', 'Transect_Length', 
+                            'Transect_Length_unscaled', 'Season_Transect', 'Year_Transect', 'Year_Transect_unscaled') # fill in all variables that are interesting
 det.covs.transect <- list()
 for(det.var in det.variables.transect){
-  dat <- locs_transects_scaled %>% st_drop_geometry() %>%
+  dat <- locs_transects %>% st_drop_geometry() %>%
     ungroup() %>% 
     select(CellID, Cell_visit, !!sym(det.var)) %>% 
     pivot_wider(names_from = Cell_visit, names_prefix = 'Visit_',
@@ -205,11 +205,11 @@ for(det.var in det.variables.transect){
   rm(dat)
 }
 
-names(deploy_cam_visit_occu_scaled)
-det.variables.camera <- c('Project_Camera', 'Julian_Date_Start_Camera', 'Trapping_Days', 'Season_Camera', 'Year_Camera') # fill in all variables which could be interesting
+names(deploy_cam_visit_occu)
+det.variables.camera <- c('Project_Camera', 'Project_lumped_Camera', 'Date_Camera', 'Date_Camera_unscaled', 'Trapping_Days', 'Trapping_Days_unscaled', 'Season_Camera', 'Year_Camera', 'Year_Camera_unscaled') # fill in all variables which could be interesting
 det.covs.camera <- list()
 for(det.var in det.variables.camera){
-  dat <- deploy_cam_visit_occu_scaled %>% ungroup() %>% 
+  dat <- deploy_cam_visit_occu %>% ungroup() %>% 
     select(CellID, Cell_visit, !!sym(det.var)) %>% 
     pivot_wider(names_from = Cell_visit, names_prefix = 'Visit_',
                 values_from = !!sym(det.var))
@@ -229,20 +229,27 @@ det.covs
 
 # for transect data 
 sites.transect <- unique(locs_transects$CellID) 
-occ.covs.transect <- envCovs %>%
-  mutate(across(-CellID, ~ scale(.) %>% as.vector())) %>% # scale all numeric values 
+occ.covs.transect.unscaled <- envCovs %>%
   filter(CellID %in% sites.transect) %>% 
   arrange(CellID)
+occ.covs.transect <- occ.covs.transect.unscaled %>% 
+  mutate(across(-CellID, ~ scale(.) %>% as.vector()))
+  
 
 # for camera data 
-sites.camera <- unique(deploy_cam_visit_occu$CellID) # there is an NA, and I assume that because of the one location with lies outside the study area
-occ.covs.camera <- envCovs %>%
-  mutate(across(-CellID, ~ scale(.) %>% as.vector())) %>% # scale all numeric values 
-filter(CellID %in% sites.camera) %>% 
+sites.camera <- unique(deploy_cam_visit_occu$CellID) 
+occ.covs.camera.unscaled <- envCovs %>%
+  filter(CellID %in% sites.camera) %>% 
   arrange(CellID)
-
+occ.covs.camera <- occ.covs.camera.unscaled %>% 
+  mutate(across(-CellID, ~ scale(.) %>% as.vector()))  # scale all numeric values 
+  
+# bind everything together 
 occ.covs <- bind_rows(occ.covs.transect, occ.covs.camera)
+occ.covs.unscaled <- bind_rows(occ.covs.camera.unscaled, occ.covs.transect.unscaled)
 occ.covs
+
+rm(occ.covs.camera.unscaled, occ.covs.transect.unscaled) # remove unneeded objects 
 
 
 
@@ -302,8 +309,8 @@ names(data.list) <- c('occ.covs', 'det.covs', 'y', 'sites') # name data.list cor
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 # set inits, alpha - det.covs, z for 
-inits.list <- list(alpha = list(transect = rep(0, length(det.covs.transect)+1), # alpha gives initial values for det with each a list per data source, which hosts a vec with length of n() of predictors for this data source
-                                camera = rep(0, 18)), # choose 0 as initial value
+inits.list <- list(alpha = list(transect = rep(0, 6), # alpha gives initial values for det with each a list per data source, which hosts a vec with length of n() of predictors for this data source
+                                camera = rep(0, 8)), # choose 0 as initial value
                    beta = rep(0, 1), # for ecological state model, start occupancy covariates at 0, length is the number of occu covs (n.occ.covs)
                    #sigma.sq.psi.inits, for random effects in the occurence model
                    sigma.sq.p.inits = list(transect = 0, # for random effects in the det model, wrong list name in the documentation
@@ -320,9 +327,9 @@ n.samples <- 20000
 
 # call simple first model 
 gc()
-m1 <- intPGOcc(occ.formula = ~ river_density_med_large + Distance_large_river + mean_elev + JRC_transition_Degraded_forest_short_duration_disturbance_after_2014 + JRC_transition_Undisturbed_tropical_moist_forest, #occ.cov, 
-               det.formula = list(transect = ~ Julian_Date_Start_Transect + I(Julian_Date_Start_Transect^2)  + Transect_Length + Project_Transect + Season_Transect + (1 | Year_Transect), 
-                                  camera = ~ Julian_Date_Start_Camera + I(Julian_Date_Start_Camera^2) + Trapping_Days + Project_Camera + Season_Camera + (1 | Year_Camera)), 
+m1 <- intPGOcc(occ.formula = ~ river_density_med_large + Distance_large_river + mean_elev + JRC_transition_Degraded_forest_short_duration_disturbance_after_2014 + JRC_transition_Undisturbed_tropical_moist_forest , #occ.cov, 
+               det.formula = list(transect = ~ Date_Transect + I(Date_Transect^2)  + Transect_Length + Project_Transect + Season_Transect + (1 | Year_Transect), 
+                                  camera = ~ Date_Camera + I(Date_Camera^2) + Trapping_Days + Project_lumped_Camera + Season_Camera + (1 | Year_Camera)), 
                data = data.list,
                inits = inits.list,
                n.samples = n.samples, 
@@ -341,36 +348,22 @@ summary(m1) # Rhat looks pretty good, ESS always (mostly far) above 1000
 
 
 # produce posterior predictive checks, here using chi-square and freeman tukey - the results aren't very similar
-ppc_m1_chi <- ppcOcc(m1, fit.stat = 'chi-squared', group = 1) # group 1 - groups values by site, group 2 - groups values per replicate
-ppc_m1_ft <- ppcOcc(m1, fit.stat = 'freeman-tukey', group = 1)
-summary(ppc_m1_chi) # bayesian p-values are 0.135 and 0.69
-summary(ppc_m1_ft) # here bayesian p-values look much better, both ~0.27-0.28
+ppc_m1 <- ppcOcc(m1, fit.stat = 'freeman-tukey', group = 1) # group 1 - groups values by site, group 2 - groups values per replicate, there is also chi squared available
+summary(ppc_m1) # here bayesian p-values look much better, both ~0.27-0.28
 
 
 # produce a model check plot, code taken from https://doserlab.com/files/spoccupancy-web/articles/modelfitting
-# chi square stats
-ppc_m1_chi_df <- data.frame(fit = ppc_m1_chi$fit.y[[2]], 
-                            fit.rep = ppc_m1_chi$fit.y.rep[[2]], 
+ppc_m1_df <- data.frame(fit = ppc_m1$fit.y[[2]], 
+                            fit.rep = ppc_m1$fit.y.rep[[2]], 
                             color = 'lightskyblue1')
-ppc_m1_chi_df $color[ppc_m1_chi_df$fit.rep > ppc_m1_chi_df$fit] <- 'lightsalmon'
-plot(ppc_m1_chi_df$fit, ppc_m1_chi_df$fit.rep, bg = ppc_m1_chi_df$color, pch = 21, 
-     ylab = 'Fit', xlab = 'True')
-lines(ppc_m1_chi_df$fit, ppc_m1_chi_df$fit, col = 'black')
-# freeman tukey stats 
-ppc_m1_ft_df <- data.frame(fit = ppc_m1_ft$fit.y[[2]], 
-                            fit.rep = ppc_m1_ft$fit.y.rep[[2]], 
-                            color = 'lightskyblue1')
-ppc_m1_ft_df$color[ppc_m1_ft_df$fit.rep > ppc_m1_ft_df$fit] <- 'lightsalmon'
-plot(ppc_m1_ft_df$fit, ppc_m1_ft_df$fit.rep, bg = ppc_m1_ft_df$color, pch = 21, 
-     ylab = 'Fit', xlab = 'True')
-lines(ppc_m1_ft_df$fit, ppc_m1_ft_df$fit, col = 'black')
+ppc_m1_df$color[ppc_m1_df$fit.rep > ppc_m1_df$fit] <- 'lightsalmon'
+plot(ppc_m1_df$fit, ppc_m1_df$fit.rep, bg = ppc_m1_df$color, pch = 21, 
+     ylab = 'Fit', xlab = 'True', main = 'Transect Data')
+lines(ppc_m1_df$fit, ppc_m1_df$fit, col = 'black')
 
 # lets have a look if there are any very influential data points 
-diff_fit_chi <- ppc_m1_chi$fit.y.rep.group.quants[[1]][3, ] - ppc_m1_chi$fit.y.group.quants[[1]][3, ] # change list to 1 or 2, depending on transect or camera, respectively 
-plot(diff_fit_chi, pch = 19, xlab = 'Site ID', ylab = 'Replicate - True Discrepancy')
-
-diff_fit_ft <- ppc_m1_ft$fit.y.rep.group.quants[[2]][3, ] - ppc_m1_ft$fit.y.group.quants[[2]][3, ] # change list to 1 or 2, depending on transect or camera, respectively 
-plot(diff_fit_ft, pch = 19, xlab = 'Site ID', ylab = 'Replicate - True Discrepancy')
+diff_fit <- ppc_m1$fit.y.rep.group.quants[[2]][3, ] - ppc_m1$fit.y.group.quants[[2]][3, ] # change list to 1 or 2, depending on transect or camera, respectively 
+plot(diff_fit, pch = 19, xlab = 'Site ID', ylab = 'Replicate - True Discrepancy', main = 'Camera Data')
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -392,53 +385,35 @@ MCMCplot(m1$alpha.samples, ref_ovl = TRUE, ci = c(50, 95),  main = "Detection Ef
 ##### 8. Plot influence of variables on Occupancy and Detection  ######
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-new_data <- data.frame(
-  `(Intercept)` = rep(1, 1000),
-  # Scaled variables
-  river_density_med_large = scale(seq(min(occ.covs$river_density_med_large), max(occ.covs$river_density_med_large), length.out = 1000)),
-  Distance_large_river = scale(seq(min(occ.covs$Distance_large_river), max(occ.covs$Distance_large_river), length.out = 1000)),
-  mean_elev = scale(seq(min(occ.covs$mean_elev), max(occ.covs$mean_elev), length.out = 1000)),
-  JRC_transition_Degraded_forest_short_duration_disturbance_after_2014 = scale(seq(min(occ.covs$JRC_transition_Degraded_forest_short_duration_disturbance_after_2014), 
-                                                                                   max(occ.covs$JRC_transition_Degraded_forest_short_duration_disturbance_after_2014), length.out = 1000)),
-  JRC_transition_Undisturbed_tropical_moist_forest = scale(seq(min(occ.covs$JRC_transition_Undisturbed_tropical_moist_forest), 
-                                                               max(occ.covs$JRC_transition_Undisturbed_tropical_moist_forest), length.out = 1000)),
-  
-  # Unscaled variables for later plotting
-  river_density_med_large_unscaled = seq(
-    min(envCovs_sf %>% filter(CellID %in% c(sites.camera, sites.transect)) %>% pull(river_density_med_large)), 
-    max(envCovs_sf %>% filter(CellID %in% c(sites.camera, sites.transect)) %>% pull(river_density_med_large)), 
-    length.out = 1000),
-  Distance_large_river_unscaled = seq(
-    min(envCovs_sf %>% filter(CellID %in% c(sites.camera, sites.transect)) %>% pull(Distance_large_river)), 
-    max(envCovs_sf %>% filter(CellID %in% c(sites.camera, sites.transect)) %>% pull(Distance_large_river)), 
-    length.out = 1000),
-  mean_elev_unscaled = seq(
-    min(envCovs_sf %>% filter(CellID %in% c(sites.camera, sites.transect)) %>% pull(mean_elev)), 
-    max(envCovs_sf %>% filter(CellID %in% c(sites.camera, sites.transect)) %>% pull(mean_elev)), 
-    length.out = 1000),
-  JRC_transition_Degraded_forest_short_duration_disturbance_after_2014_unscaled = seq(
-    min(envCovs_sf %>% filter(CellID %in% c(sites.camera, sites.transect)) %>% pull(JRC_transition_Degraded_forest_short_duration_disturbance_after_2014)), 
-    max(envCovs_sf %>% filter(CellID %in% c(sites.camera, sites.transect)) %>% pull(JRC_transition_Degraded_forest_short_duration_disturbance_after_2014)), 
-    length.out = 1000),
-  JRC_transition_Undisturbed_tropical_moist_forest_unscaled = seq(
-    min(envCovs_sf %>% filter(CellID %in% c(sites.camera, sites.transect)) %>% pull(JRC_transition_Undisturbed_tropical_moist_forest)), 
-    max(envCovs_sf %>% filter(CellID %in% c(sites.camera, sites.transect)) %>% pull(JRC_transition_Undisturbed_tropical_moist_forest)), 
-    length.out = 1000))
+# create data frame for prediction
+new_data <- data.frame(`(Intercept)` = rep(1, 1000),
+                       river_density_med_large = seq(min(occ.covs$river_density_med_large), max(occ.covs$river_density_med_large), length.out = 5000), 
+                       Distance_large_river = seq(min(occ.covs$Distance_large_river), max(occ.covs$Distance_large_river), length.out = 5000), 
+                       mean_elev = seq(min(occ.covs$mean_elev), max(occ.covs$mean_elev), length.out = 5000), 
+                       JRC_transition_Degraded_forest_short_duration_disturbance_after_2014 = seq(min(occ.covs$JRC_transition_Degraded_forest_short_duration_disturbance_after_2014), max(occ.covs$JRC_transition_Degraded_forest_short_duration_disturbance_after_2014), length.out = 5000), 
+                       JRC_transition_Undisturbed_tropical_moist_forest = seq(min(occ.covs$JRC_transition_Undisturbed_tropical_moist_forest), max(occ.covs$JRC_transition_Undisturbed_tropical_moist_forest), length.out = 5000), 
+                       # unscaled values for plotting
+                       river_density_med_large_unscaled = seq(min(occ.covs.unscaled$river_density_med_large), max(occ.covs.unscaled$river_density_med_large), length.out = 5000), 
+                       Distance_large_river_unscaled = seq(min(occ.covs.unscaled$Distance_large_river), max(occ.covs.unscaled$Distance_large_river), length.out = 5000), 
+                       mean_elev_unscaled = seq(min(occ.covs.unscaled$mean_elev), max(occ.covs.unscaled$mean_elev), length.out = 5000), 
+                       JRC_transition_Degraded_forest_short_duration_disturbance_after_2014_unscaled = seq(min(occ.covs.unscaled$JRC_transition_Degraded_forest_short_duration_disturbance_after_2014), max(occ.covs.unscaled$JRC_transition_Degraded_forest_short_duration_disturbance_after_2014), length.out = 5000), 
+                       JRC_transition_Undisturbed_tropical_moist_forest_unscaled = seq(min(occ.covs.unscaled$JRC_transition_Undisturbed_tropical_moist_forest), max(occ.covs.unscaled$JRC_transition_Undisturbed_tropical_moist_forest), length.out = 5000))
 
-new_data <- data.frame(
-  `(Intercept)` = rep(1, 1000),
-  # Scaled variables
-  river_density_med_large = mean(scale(seq(min(occ.covs$river_density_med_large), max(occ.covs$river_density_med_large), length.out = 1000))),
-  Distance_large_river = mean(scale(seq(min(occ.covs$Distance_large_river), max(occ.covs$Distance_large_river), length.out = 1000))),
-  mean_elev = scale(seq(min(occ.covs$mean_elev), max(occ.covs$mean_elev), length.out = 1000)),
-  JRC_transition_Degraded_forest_short_duration_disturbance_after_2014 = mean(scale(seq(min(occ.covs$JRC_transition_Degraded_forest_short_duration_disturbance_after_2014), 
-                                                                                   max(occ.covs$JRC_transition_Degraded_forest_short_duration_disturbance_after_2014), length.out = 1000))),
-  JRC_transition_Undisturbed_tropical_moist_forest = mean(scale(seq(min(occ.covs$JRC_transition_Undisturbed_tropical_moist_forest), 
-                                                               max(occ.covs$JRC_transition_Undisturbed_tropical_moist_forest), length.out = 1000))), 
-  mean_elev_unscaled = seq(
-    min(envCovs_sf %>% filter(CellID %in% c(sites.camera, sites.transect)) %>% pull(mean_elev)), 
-    max(envCovs_sf %>% filter(CellID %in% c(sites.camera, sites.transect)) %>% pull(mean_elev)), 
-    length.out = 1000))
+
+################################################################################
+##### things to solve ####
+# prediction for each effect size, find a smart solution, have a look, how done in unmarked # 
+# have a look why now different fit for transect 
+# have a look again at the det covariates 
+# add location as occu predictor 
+# solve problem with inits 
+# have a look at priors 
+# search for possibility for zero inflation
+# find solution for date
+# produce nicer plots 
+# now, the predictions are q
+
+
 
 X.0 <- as.matrix(new_data[,1:6])
 
@@ -495,10 +470,11 @@ tm_shape(plot_m1_sf) +
 # fancier plot
 library(ggspatial)
 ggplot(data = plot_m1_sf) +
-  annotation_map_tile(zoom = 10, type = 'cartolight') +
-  geom_sf(aes(fill = pred_mean), color = NA, alpha = 0.5) +  # Use pred_mean for fill color
-  scale_fill_viridis_c(option = "viridis", name = "Predicted Mean Occupancy") + # scale_fill_viridis_c(option = "magma"), or replace "magma" with "inferno", "plasma", "cividis", 
-  theme_minimal() +
+  #annotation_map_tile(zoom = 10, type = 'cartolight') +
+  geom_sf(aes(fill = pred_mean), # color = NA, 
+          alpha = 1) +  # Use pred_mean for fill color
+  scale_fill_viridis_c(option = "plasma", name = "Mean Predicted Occupancy", limits = c(0,1), direction = -1) + # scale_fill_viridis_c(option = "magma"), or replace "magma" with "inferno", "plasma", "cividis", 
+  theme_bw() +
   theme(legend.position = "right", 
         panel.border = element_rect(color = "darkgrey", fill = NA, linewidth = 1), # add frame
         axis.line = element_blank()) +

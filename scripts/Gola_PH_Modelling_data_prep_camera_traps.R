@@ -273,6 +273,7 @@ write.csv(deploy_cam, file = 'C:/Users/filib/Documents/Praktika/RSPB/Gola_PH_Mod
 
 # plot an overview of all deployments with their observations of PH 
 ggplot() +
+  annotation_map_tile(zoom = 10, type = 'osm') +
   geom_point(data = deploy_cam, mapping = aes(x= UTM_X_meters, y = UTM_Y_meters), size = 2) +
   geom_point(data = pres_cam, mapping = aes(x= UTM_X_meters, y = UTM_Y_meters), color = 'red', size =.7) +
   labs(title = 'Camera Trap Deployments and their Pygmy hippo Observations in Gola')

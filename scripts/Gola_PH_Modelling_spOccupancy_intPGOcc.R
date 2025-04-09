@@ -382,27 +382,49 @@ MCMCplot(m1$alpha.samples, ref_ovl = TRUE, ci = c(50, 95),  main = "Detection Ef
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-##### 8. Plot influence of variables on Occupancy and Detection  ######
+##### 8. Plot marginal effects plots influence for Occupancy   ######
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-# create data frame for prediction
-new_data <- data.frame(`(Intercept)` = rep(1, 1000),
-                       river_density_med_large = seq(min(occ.covs$river_density_med_large), max(occ.covs$river_density_med_large), length.out = 5000), 
-                       Distance_large_river = seq(min(occ.covs$Distance_large_river), max(occ.covs$Distance_large_river), length.out = 5000), 
-                       mean_elev = seq(min(occ.covs$mean_elev), max(occ.covs$mean_elev), length.out = 5000), 
-                       JRC_transition_Degraded_forest_short_duration_disturbance_after_2014 = seq(min(occ.covs$JRC_transition_Degraded_forest_short_duration_disturbance_after_2014), max(occ.covs$JRC_transition_Degraded_forest_short_duration_disturbance_after_2014), length.out = 5000), 
-                       JRC_transition_Undisturbed_tropical_moist_forest = seq(min(occ.covs$JRC_transition_Undisturbed_tropical_moist_forest), max(occ.covs$JRC_transition_Undisturbed_tropical_moist_forest), length.out = 5000), 
-                       # unscaled values for plotting
-                       river_density_med_large_unscaled = seq(min(occ.covs.unscaled$river_density_med_large), max(occ.covs.unscaled$river_density_med_large), length.out = 5000), 
-                       Distance_large_river_unscaled = seq(min(occ.covs.unscaled$Distance_large_river), max(occ.covs.unscaled$Distance_large_river), length.out = 5000), 
-                       mean_elev_unscaled = seq(min(occ.covs.unscaled$mean_elev), max(occ.covs.unscaled$mean_elev), length.out = 5000), 
-                       JRC_transition_Degraded_forest_short_duration_disturbance_after_2014_unscaled = seq(min(occ.covs.unscaled$JRC_transition_Degraded_forest_short_duration_disturbance_after_2014), max(occ.covs.unscaled$JRC_transition_Degraded_forest_short_duration_disturbance_after_2014), length.out = 5000), 
-                       JRC_transition_Undisturbed_tropical_moist_forest_unscaled = seq(min(occ.covs.unscaled$JRC_transition_Undisturbed_tropical_moist_forest), max(occ.covs.unscaled$JRC_transition_Undisturbed_tropical_moist_forest), length.out = 5000))
+# predict for each variable while holding the other variables constant (here mean of scaled numeric variables, which would be 0)
+n <- 1000 # length of df determines how many predictions should be made, influence on computation time 
+const_val <- data.frame(`(Intercept)` = rep(1, n),
+                       river_density_med_large = rep(mean(occ.covs$river_density_med_large), length.out = n), 
+                       Distance_large_river = rep(mean(occ.covs$Distance_large_river), length.out = n), 
+                       mean_elev = rep(mean(occ.covs$mean_elev), length.out = n), 
+                       JRC_transition_Degraded_forest_short_duration_disturbance_after_2014 = rep(mean(occ.covs$JRC_transition_Degraded_forest_short_duration_disturbance_after_2014), length.out = n), 
+                       JRC_transition_Undisturbed_tropical_moist_forest = rep(mean(occ.covs$JRC_transition_Undisturbed_tropical_moist_forest), length.out = n))
+effect_occu_all <- data.frame() # initialise df
+occ.var <- colnames(m1$X)[2:dim(m1$X)[2]] # get all variables used in occu fomula, except of intercept
+for(var in occ.var){
+  X.0 <- const_val %>% # create matrix to hand over to predict function
+    mutate(!!var := seq(min(occ.covs[,var]), max(occ.covs[,var]), length.out = n),
+           unscaled = seq(min(occ.covs.unscaled[,var]), max(occ.covs.unscaled[,var]), length.out = n)) %>% 
+    as.matrix()
+  
+  pred_occu_effect <- predict(m1, type = 'occupancy', ignore.RE = T, X.0 = X.0[,!grepl('unscaled', colnames(X.0))]) # predict with matrix
+  pred_occu_effect <- apply(pred_occu_effect$psi.0.samples, 2, quantile, c(0.025, 0.5, 0.975))   # summarise prediction 
+  
+  occu_effect <- as.data.frame(t(pred_occu_effect)) %>%   # wrangle data together 
+    rename(pred_mean = `50%`, pred_CI_lower = `2.5%`, pred_CI_upper = `97.5%`) 
+  occu_effect <- bind_cols(occu_effect,  unscaled = X.0[,'unscaled']) %>% 
+    mutate(Variable = var)
+  
+  effect_occu_all <- bind_rows(effect_occu_all, occu_effect)   # save in massive df
+}
+
+# produce quick plot
+ggplot(effect_occu_all) +
+  geom_ribbon(aes(x = unscaled, ymin = pred_CI_lower, ymax = pred_CI_upper), fill = "skyblue", alpha = 0.5) +
+  geom_line(aes(x = unscaled, y = pred_mean), color = "blue", size = 1) +
+  facet_wrap(~Variable, scale = 'free_x')+
+  ggtitle("Effect of Model Variables on Predicted Occupancy") +
+  xlab("Variable") + 
+  ylab("Predicted Occupancy") +
+  theme_bw()
 
 
 ################################################################################
 ##### things to solve ####
-# prediction for each effect size, find a smart solution, have a look, how done in unmarked # 
 # have a look why now different fit for transect 
 # have a look again at the det covariates 
 # add location as occu predictor 
@@ -411,32 +433,7 @@ new_data <- data.frame(`(Intercept)` = rep(1, 1000),
 # search for possibility for zero inflation
 # find solution for date
 # produce nicer plots 
-# now, the predictions are q
-
-
-
-X.0 <- as.matrix(new_data[,1:6])
-
-# predict on new data frame 
-pred_m1_effect_occu <- predict(m1, type = 'occupancy', ignore.RE = T, X.0 = X.0)
-
-# summarize prediction 
-pred_m1_effect_occu <- apply(pred_m1_effect_occu$psi.0.samples, 2, quantile, c(0.025, 0.5, 0.975))
-# create a df for plotting 
-plot_m1_effect_occu <- as.data.frame(t(pred_m1_effect_occu)) %>% 
-  rename(pred_mean = `50%`, pred_CI_lower = `2.5%`, pred_CI_upper = `97.5%`) 
-plot_m1_effect_occu <- cbind(plot_m1_effect_occu, new_data)
-
-
-# produce quick plot
-ggplot(plot_m1_effect_occu) +
-  geom_ribbon(aes(x = mean_elev_unscaled, ymin = pred_CI_lower, ymax = pred_CI_upper), fill = "skyblue", alpha = 0.5) +
-  geom_line(aes(x = mean_elev_unscaled, y = pred_mean), color = "blue", size = 1) +
-  ggtitle("Effect of Elevation on Predicted Occupancy") +
-  xlab("Mean Elevation in meter above NN") + 
-  ylab("Predicted Occupancy") +
-  theme_bw()
-
+# now, the predictions are 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ##### 9. Predict Pygmy hippo Occurence in Gola ######

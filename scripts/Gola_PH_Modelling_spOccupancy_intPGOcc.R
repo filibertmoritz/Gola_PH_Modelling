@@ -3,6 +3,12 @@
 
 # data has roughgly been prepared elsewhere
 
+
+# check again how the variables are coded and with scaled and unscaled variables, scale only numeric 
+# check priors and inits and set them to appropriate values 
+# 
+
+
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ##### 1. Preparatations ######
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -309,10 +315,10 @@ names(data.list) <- c('occ.covs', 'det.covs', 'y', 'sites') # name data.list cor
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 # set inits, alpha - det.covs, z for 
-inits.list <- list(alpha = list(transect = rep(0, 6), # alpha gives initial values for det with each a list per data source, which hosts a vec with length of n() of predictors for this data source
-                                camera = rep(0, 8)), # choose 0 as initial value
-                   beta = rep(0, 1), # for ecological state model, start occupancy covariates at 0, length is the number of occu covs (n.occ.covs)
-                   #sigma.sq.psi.inits, for random effects in the occurence model
+inits.list <- list(alpha = list(transect = 0, # alpha gives initial values for det with each a list per data source, which hosts a vec with length of n() of predictors for this data source
+                                camera = 0), # choose 0 as initial value
+                   beta = 0, # for ecological state model, start occupancy covariates at 0, length is the number of occu covs (n.occ.covs)
+                   # sigma.sq.psi.inits = list, # for random effects in the occurence model
                    sigma.sq.p.inits = list(transect = 0, # for random effects in the det model, wrong list name in the documentation
                                      camera = 0),  
                    z = rep(1, n.sites)) # z is for latent variable (here occupancy), start with 1 for all sites occupied
@@ -321,21 +327,30 @@ inits.list <- list(alpha = list(transect = rep(0, 6), # alpha gives initial valu
 priors.list <- list(beta.normal = list(mean = 0, var = 2.72), # priors for beta, the ecological state model (occu) given in a list where two vectors are given, first for mean and second for variance, if they are all the same, only one value per tag
                     alpha.normal = list(mean = list(0, 0), 
                                         var = list(2.72, 2.72)),
-                    sigma.sq.p.ig = list(shape = c(0.1), # random effects for det, vector in the lists have to have length of number of random effects 
+                    sigma.sq.p.ig = list(shape = c(0.1), # random effects for det all follow inverse Gamma distribution, vector in the lists have to have length of number of random effects 
                                        scale = c(0.1)))
 n.samples <- 20000
 
-# call simple first model 
+# call simple global model 
+
+# different models: 
+## year as.numeric and as.factor in both det in random effect 
+## camera project lumped in det formula, camera project non lumped with all levels as random effects additional to year
+## add reserve type into occ model 
+## year is not doable in occ model 
+## in det try both Date and Date^2
+## add nested random effect for Season and year as factor in det models 
+
 gc()
 m1 <- intPGOcc(occ.formula = ~ river_density_med_large + Distance_large_river + mean_elev + JRC_transition_Degraded_forest_short_duration_disturbance_after_2014 + JRC_transition_Undisturbed_tropical_moist_forest , #occ.cov, 
                det.formula = list(transect = ~ Date_Transect + I(Date_Transect^2)  + Transect_Length + Project_Transect + Season_Transect + (1 | Year_Transect), 
-                                  camera = ~ Date_Camera + I(Date_Camera^2) + Trapping_Days + Project_lumped_Camera + Season_Camera + (1 | Year_Camera)), 
+                                  camera = ~ Date_Camera + I(Date_Camera^2) + Trapping_Days + Season_Camera + (1 | Year_Camera)) + (1 | Project_Camera), 
                data = data.list,
                inits = inits.list,
                n.samples = n.samples, 
                priors = priors.list, 
                n.omp.threads = 5, # use 5 cores
-               verbose = TRUE, 
+               verbose = TRUE, # means that messages about processing and computation are printed to console
                n.report = 2500, 
                n.burn = 10000, 
                n.thin = 1, # no thinning
@@ -348,8 +363,9 @@ summary(m1) # Rhat looks pretty good, ESS always (mostly far) above 1000
 
 
 # produce posterior predictive checks, here using chi-square and freeman tukey - the results aren't very similar
+gc()
 ppc_m1 <- ppcOcc(m1, fit.stat = 'freeman-tukey', group = 1) # group 1 - groups values by site, group 2 - groups values per replicate, there is also chi squared available
-summary(ppc_m1) # here bayesian p-values look much better, both ~0.27-0.28
+summary(ppc_m1) # get bayes p-value
 
 
 # produce a model check plot, code taken from https://doserlab.com/files/spoccupancy-web/articles/modelfitting
@@ -421,19 +437,6 @@ ggplot(effect_occu_all) +
   xlab("Variable") + 
   ylab("Predicted Occupancy") +
   theme_bw()
-
-
-################################################################################
-##### things to solve ####
-# have a look why now different fit for transect 
-# have a look again at the det covariates 
-# add location as occu predictor 
-# solve problem with inits 
-# have a look at priors 
-# search for possibility for zero inflation
-# find solution for date
-# produce nicer plots 
-# now, the predictions are 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ##### 9. Predict Pygmy hippo Occurence in Gola ######

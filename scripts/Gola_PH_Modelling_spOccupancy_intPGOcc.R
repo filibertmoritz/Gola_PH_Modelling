@@ -342,19 +342,29 @@ n.samples <- 20000
 ## add nested random effect for Season and year as factor in det models 
 
 gc()
+
 m1 <- intPGOcc(occ.formula = ~ river_density_med_large + Distance_large_river + mean_elev + JRC_transition_Degraded_forest_short_duration_disturbance_after_2014 + JRC_transition_Undisturbed_tropical_moist_forest , #occ.cov, 
                det.formula = list(transect = ~ Date_Transect + I(Date_Transect^2)  + Transect_Length + Project_Transect + Season_Transect + (1 | Year_Transect), 
-                                  camera = ~ Date_Camera + I(Date_Camera^2) + Trapping_Days + Season_Camera + (1 | Year_Camera)) + (1 | Project_Camera), 
-               data = data.list,
-               inits = inits.list,
-               n.samples = n.samples, 
-               priors = priors.list, 
+                                  camera = ~ Date_Camera + I(Date_Camera^2) + Trapping_Days + Project_lumped_Camera + Season_Camera + (1 | Year_Camera)), 
+               data = data.list, inits = inits.list, n.samples = n.samples, priors = priors.list, 
                n.omp.threads = 5, # use 5 cores
                verbose = TRUE, # means that messages about processing and computation are printed to console
-               n.report = 2500, 
-               n.burn = 10000, 
-               n.thin = 1, # no thinning
-               n.chains = 3)
+               n.report = 2500, n.burn = 10000, 
+               n.thin = 1, n.chains = 3)
+
+#m2 <- intPGOcc(occ.formula = ~ river_density_med_large + Distance_large_river + mean_elev + JRC_transition_Degraded_forest_short_duration_disturbance_after_2014 + JRC_transition_Undisturbed_tropical_moist_forest , #occ.cov, 
+#               det.formula = list(transect = ~ Date_Transect + I(Date_Transect^2)  + Transect_Length + Project_Transect + Season_Transect + (1 | Year_Transect), 
+#                                  camera = ~ Date_Camera + I(Date_Camera^2) + Trapping_Days + Season_Camera + (1 | Year_Camera)), 
+#               data = data.list,
+#               inits = inits.list,
+#               n.samples = n.samples, 
+#               priors = priors.list, 
+#               n.omp.threads = 5, # use 5 cores
+#               verbose = TRUE, # means that messages about processing and computation are printed to console
+#               n.report = 2500, 
+#               n.burn = 10000, 
+#               n.thin = 1, # no thinning
+#               n.chains = 3)
 
 
 # access model 

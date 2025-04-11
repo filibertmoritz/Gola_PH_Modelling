@@ -57,8 +57,8 @@ rivers <- st_read('C:/Users/filib/Documents/Praktika/RSPB/data/spatialdata/Gola_
 study_area <- st_read('C:/Users/filib/Documents/Praktika/RSPB/data/spatialdata/Gola_PH_study_area.shp')
 settlements <- st_read('C:/Users/filib/Documents/Praktika/RSPB/data/spatialdata/Settlements_2021_Points.shp')
 reserves <- st_read('C:/Users/filib/Documents/Praktika/RSPB/data/spatialdata/Greater_Gola_Landscape_2024_polygons.shp')
-# roads <- st_read()
-
+# leakage_belt <- st_read('C:/Users/filib/Documents/Praktika/RSPB/data/spatialdata/Leakage_Belt_4km_polygons.shp') # this file does not really help due to its mismatch with the reserves layer:/
+roads <- st_read('C:/Users/filib/Documents/Praktika/RSPB/data/spatialdata/Roads_InProgressGola.shp')
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ##### 3. Set WGS 84 / UTM zone 29N CRS for all spatial objects ####
@@ -277,7 +277,6 @@ grid_sf <- grid_sf %>% mutate(Distance_settlement = set_units(dist_settle, m),
                               Distance_large_river = set_units(dist_large_river, m)) 
 
 
-
 ###############################################################################
 ##### CONTINUE HERE TO CREATE A LEAKAGE BELT ##################################
 ###############################################################################
@@ -285,37 +284,127 @@ grid_sf <- grid_sf %>% mutate(Distance_settlement = set_units(dist_settle, m),
 # location in forest reserve, national park, community forest or outside 
 reserves <- reserves %>% rename(Name = NAME, Reserve_Type = DESIG) %>% 
   filter(Name %in% c('Gola North', 'Gola South', 'Gola Central', 'Bunumbu', 'Tiwai Island Sanctuary', 'Kambui South', 'Kambui Hills and Extensions')) %>% 
-  select(Name, Reserve_Type) # clean shp file up 
-reserves_buffered <- vect(st_buffer(reserves %>% filter(Name %in% c('Gola North', 'Gola South', 'Gola Central')), dist = 4000))
+  select(Name, Reserve_Type) %>% 
+  st_cast('POLYGON')# clean shp file up 
+leakage_belt <- st_buffer(reserves %>% filter(Name %in% c('Gola North', 'Gola South', 'Gola Central')), dist = 4000) %>% 
+  st_union() %>% # not sure if this is smart though
+  st_cast('POLYGON') %>% st_as_sf() %>% # this is only needed if st_union is applied
+  mutate(Reserve_Type = 'Leakage Belt', 
+         Name = c('Gola South', 'Gola Central and North'))
 
-str(reserves_buffered)
-reserves_buffered <- terra::union(reserves_buffered)
-reserves_buffered
-
-plot(reserves_buffered)
-  st_union()  %>% st_cast('POLYGON')
-  
-  st_difference(reserves) %>% st_cast('POLYGON')
-test[[1]]
-st_geometry_type(test)
-plot(st_geometry(test))
-plot(st_geometry(test[[7]]))
-
-location <- st_intersection(reserves, grid_sf) %>% select(CellID, Reserve_Type) %>% 
-  mutate(area = set_units(st_area(.), km^2))%>% 
-  group_by(CellID, Reserve_Type) %>% 
-  summarise(sum_area = sum(area)) %>% 
-  group_by(CellID) %>%
-  slice_max(sum_area, n = 1) # this removes the reserve types which are not dominant / have the most area in a grid cell
-
-grid_sf <- grid_sf %>% left_join(location %>% st_drop_geometry() %>% select(Reserve_Type), join_by(CellID)) %>% 
-  mutate(if_else(is.na(Reserve_Type), 'Outside', Reserve_Type))
-  
-library(tmap)
+# plot reserves and buffer area
+tmap_mode(mode = 'view')
+tm_shape(leakage_belt) +
+  tm_polygons(fill='orange') +
 tm_shape(reserves) +
-  tm_polygons()
+  tm_polygons(fill = 'red') +
+tm_shape(grid_sf) +
+  tm_polygons(fill_alpha = 0)
 
 ################################################################################
+#### THIS WORKS MORE OR LESS ###############
+################################################################################
+
+# prepare area of reserve types per grid cell 
+location_res <- st_intersection(reserves, grid_sf) %>% select(CellID, Reserve_Type) %>% 
+  mutate(area = set_units(st_area(.), km^2))%>% 
+  group_by(CellID, Reserve_Type) %>% 
+  summarise(area_np = sum(area)) %>% 
+  group_by(CellID) %>%
+  slice_max(area_np, n = 1) # this removes the reserve types which are not dominant / have the most area in a grid cell
+
+# prepare area of leakage belt per grid cell
+location_leak <- st_intersection(leakage_belt, grid_sf) %>% select(CellID, Reserve_Type) %>% 
+  mutate(area = set_units(st_area(.), km^2))%>% # View()
+  group_by(CellID, Reserve_Type) %>% 
+  summarise(area_lk = sum(area)) %>% 
+  group_by(CellID) %>%
+  slice_max(area_lk, n = 1)
+
+location_outside <- grid_sf %>% 
+  rename(area_out = area) %>% 
+  select(CellID, area_out)
+
+# bring all data together
+location <- location_outside %>%
+  left_join(location_leak %>% st_drop_geometry() %>% select(-Reserve_Type), join_by(CellID)) %>%
+  left_join(location_res %>% st_drop_geometry(), join_by(CellID))
+
+# calc area depending on what I need
+location_area <- location %>% 
+  mutate(across(where(~inherits(., "units")), ~replace_na(., set_units(0, km^2)))) %>%
+  mutate(area_lk = drop_units(area_lk),  
+         area_np = drop_units(area_np),  
+         area_out = drop_units(area_out), 
+         area_out = area_out - area_lk,
+         Reserve_Type_new = case_when(
+           area_np > area_lk ~ Reserve_Type,
+           area_lk > area_out ~ "Leakage Belt",
+           area_out > 2 & area_out < 3 ~ "Outside",
+           area_np > 1.5 & Reserve_Type == 'National Park'~ Reserve_Type,
+           area_np > 1 & Reserve_Type != 'National Park'~ Reserve_Type,
+           TRUE ~ "Outside"))
+library(tmap)
+tm_shape(leakage_belt) +
+  tm_polygons(fill='orange') +
+  tm_shape(reserves) +
+  tm_polygons(fill = 'red') +
+  tm_shape(location_area) +
+  tm_polygons(fill = 'Reserve_Type', fill_alpha = 0.4)
+
+################################################################################
+##### STOP HERE ##############################################
+################################################################################
+
+####### THIS IS ANOTHER TRAIL WHICH DOES NOT WORK YET ############
+
+# prepare area of reserve types per grid cell 
+#location_res <- st_intersection(reserves, grid_sf) %>% select(CellID, Reserve_Type) %>% 
+#  mutate(area = st_area(.))%>% 
+#  group_by(CellID, Reserve_Type) %>% 
+#  summarise(area_np = sum(area)) %>% 
+#  group_by(CellID) %>%
+#  slice_max(area_np, n = 1) # this removes the reserve types which are not dominant / have the most area in a grid cell
+
+# prepare area of leakage belt per grid cell
+#location_leak <- st_intersection(leakage_belt, grid_sf) %>% select(CellID, Reserve_Type) %>% 
+#  mutate(area = st_area(.))%>% # View()
+#  group_by(CellID, Reserve_Type) %>% 
+#  summarise(area_lk = sum(area)) %>% 
+#  group_by(CellID) %>%
+#  slice_max(area_lk, n = 1)
+
+#location_outside <- grid_sf %>% mutate(area = as.numeric(area)) %>%
+#  rename(area_out = area) %>% 
+#  select(CellID, area_out)
+
+# bring all data together
+#location <- location_outside %>%
+#    left_join(location_leak %>% st_drop_geometry() %>% select(-Reserve_Type), join_by(CellID)) %>%
+#    left_join(location_res %>% st_drop_geometry(), join_by(CellID))
+
+# calc area depending on what I need
+#location_area <- location %>% 
+#  mutate(area_out = area_out - area_lk, 
+#         area_lk = area_lk - area_np) %>% 
+#  mutate(case_when(area_np>1~Reserve_Type, 
+#                   as.numeric(area_np)<1~'Outside', 
+#                   as.numeric(area_lk)>1~'Leakage_Belt'))
+
+
+library(tmap)
+tm_shape(leakage_belt) +
+  tm_polygons(fill='orange') +
+  tm_shape(reserves) +
+  tm_polygons(fill = 'red') +
+  tm_shape(location_area) +
+  tm_polygons(fill = 'Reserve_Type', fill_alpha = 0.4)
+
+
+#########################################################
+##### STOPPED HERE #####################################
+#########################################################
+
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

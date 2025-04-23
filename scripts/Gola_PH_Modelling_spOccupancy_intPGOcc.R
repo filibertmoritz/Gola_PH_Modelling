@@ -133,7 +133,7 @@ for(i in 2:length(unique_ID)) { # loop over all other IDs
   joined_pres <- bind_rows(joined_pres, df) # bind results together 
 }
 pres_transects_sf <- joined_pres
-rm(joined_pres)
+rm(joined_pres, df)
 
 # make a plot to check, that everything went okay - there should be subtransects 
 # tm_shape(grid_sf) +
@@ -157,10 +157,13 @@ locs_transects <- locs_transects %>%
   group_by(CellID) %>% 
   mutate(Cell_visit = row_number())
 
-
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ##### 5. Bring data together for spOccupancy ######
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+deploy_cam_visit_occu %>% head()
+envCovs_sf %>% head()
+locs_transects %>% head()
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ###### 5.1 Det Covs ######
@@ -169,15 +172,17 @@ locs_transects <- locs_transects %>%
 # calculate a few det covariates, improve season by assigning the season where the majority was surveyed
 locs_transects <- locs_transects %>% ungroup() %>%
   mutate(Date_Transect_unscaled = lubridate::yday(DateTime_Start), # Julian start date, improve by taking a mean date?
-         Year_Transect = as.factor(year(DateTime_Start)), # survey year coded as factor
+         Year_Transect_fact = as.factor(year(DateTime_Start)), # survey year coded as factor
+         Year_Transect_num_unscaled = as.numeric(year(DateTime_Start)-2011), # survey year coded as numeric
          Season_Transect = as.factor(if_else(month(DateTime_Start) %in% 5:10, 'Wet', 'Dry')), # wet season from May (05) to October (10), https://doi.org/10.51847/8Wz28ID8Mn
-         # Reserve_Type_Transect = as.ordered(), # add the protection status here 
          Transect_Length_unscaled = as.numeric(transect_length), 
          # Period_Transect = as.factor(if_else(year(DateTime_End) <= 2017, '2011-2017', '2018-2024')),
-         Project_Transect = as.factor(Project)) # %>% select(-transect_length) 
-locs_transects <- locs_transects %>% mutate(Year_Transect = as.numeric(scale(Year_Transect_unscaled)), # scale numeric variables
+         Project_Transect_fact = as.factor(Project), 
+         Project_Transect_num_unscaled = as.numeric(if_else(Project =='Pygmy Hippo ARTP_REDD 2013-2014', 0, 1))) # %>% select(-transect_length) 
+locs_transects <- locs_transects %>% mutate(Year_Transect_num = as.numeric(scale(Year_Transect_num_unscaled)), # scale numeric variables
                                             Date_Transect = as.numeric(scale(Date_Transect_unscaled)), 
-                                            Transect_Length = as.numeric(scale(Transect_Length_unscaled)))
+                                            Transect_Length = as.numeric(scale(Transect_Length_unscaled)), 
+                                            Project_Transect_num = as.numeric(scale(Project_Transect_num_unscaled)))
 
 deploy_cam_visit_occu <- deploy_cam_visit_occu %>% ungroup()%>% 
   mutate(Project_Camera = as.factor(Project), 
@@ -185,21 +190,25 @@ deploy_cam_visit_occu <- deploy_cam_visit_occu %>% ungroup()%>%
                                                      Project %in% c('REDD_SP1', 'REDD_SP2', 'REDD_SP3', 'REDD_SP4', 'Pygmy Hippo REDD CT 2019-2021','artp_p1', 'artp_p2', 'REDD_ARTP_PygmyHippo 2013-2014') ~ 'REDD_ARTP', 
                                                      Project %in% c('Darwin19_22', 'Darwin_morroRiver', 'darwin_13_17') ~ 'Darwin', 
                                                      Project %in% c('IWT_CF') ~ 'IWT')),
+         Project_Focus_fact = as.ordered(if_else(Project %in% c('BasalZoo_2024', 'Basel Zoo PygmyHippo 2018-2020', 
+                                                                'Darwin_morroRiver', 'IWT_CT', 'Pygmy Hippo REDD CT 2019-2021', 
+                                                                'REDD_ARTP_PygmyHippo 2013-2014'), 'Pygmy_hippo', 'Other')),
+         Project_Focus_num_unscaled = as.numeric(if_else(Project_Focus_fact == 'Pygmy_hippo', 1, 0)), # Pygmy hippo is coded as 1, other as 0
          Date_Camera_unscaled = yday(Visit_start), 
-         # Reserve_Type_Camera = as.ordered(), # add the protection status here 
-         Year_Camera = as.factor(year(Visit_start)), # survey year coded as factor
+         Year_Camera_fact = as.factor(year(Visit_start)), # survey year coded as factor
+         Year_Camera_num_unscaled = as.numeric(year(Visit_start)-2011), # survey year coded as numeric
          Season_Camera = as.factor(if_else(month(Visit_start) %in% 5:10, 'Wet', 'Dry')),
          # Period_Camera = as.factor(if_else(year(Visit_end) <= 2017, '2011-2017', '2018-2024')),
          Trapping_Days_unscaled = as.numeric(Visit_length)) # %>% select(-transect_length) # %>% select(-Visit_length) 
-deploy_cam_visit_occu <- deploy_cam_visit_occu %>% mutate(Year_Camera = as.numeric(scale(Year_Camera_unscaled)), # scale numeric variables
+deploy_cam_visit_occu <- deploy_cam_visit_occu %>% mutate(Year_Camera_num = as.numeric(scale(Year_Camera_num_unscaled)), # scale numeric variables
                                             Date_Camera = as.numeric(scale(Date_Camera_unscaled)), 
-                                            Trapping_Days = as.numeric(scale(Trapping_Days_unscaled)))
-
+                                            Trapping_Days = as.numeric(scale(Trapping_Days_unscaled)), 
+                                            Project_Focus_num = as.numeric(scale(Project_Focus_num_unscaled)))
 
 # extract det.covs data
 names(locs_transects) 
-det.variables.transect <- c('Project_Transect', 'Date_Transect', 'Date_Transect_unscaled', 'Transect_Length', 
-                            'Transect_Length_unscaled', 'Season_Transect', 'Year_Transect', 'Year_Transect_unscaled') # fill in all variables that are interesting
+det.variables.transect <- c('Project_Transect_fact', 'Project_Transect_num', 'Project_Transect_num_unscaled', 'Date_Transect', 'Date_Transect_unscaled', 'Transect_Length',  
+                            'Transect_Length_unscaled', 'Season_Transect', 'Year_Transect_num', 'Year_Transect_num_unscaled', 'Year_Transect_fact') # fill in all variables that are interesting
 det.covs.transect <- list()
 for(det.var in det.variables.transect){
   dat <- locs_transects %>% st_drop_geometry() %>%
@@ -212,7 +221,8 @@ for(det.var in det.variables.transect){
 }
 
 names(deploy_cam_visit_occu)
-det.variables.camera <- c('Project_Camera', 'Project_lumped_Camera', 'Date_Camera', 'Date_Camera_unscaled', 'Trapping_Days', 'Trapping_Days_unscaled', 'Season_Camera', 'Year_Camera', 'Year_Camera_unscaled') # fill in all variables which could be interesting
+det.variables.camera <- c('Project_Camera', 'Project_lumped_Camera', 'Project_Focus_num', 'Project_Focus_num_unscaled', 'Project_Focus_fact', 'Date_Camera', 'Date_Camera_unscaled', 'Trapping_Days', 
+                          'Trapping_Days_unscaled', 'Season_Camera', 'Year_Camera_num', 'Year_Camera_num_unscaled', 'Year_Camera_fact') # fill in all variables which could be interesting
 det.covs.camera <- list()
 for(det.var in det.variables.camera){
   dat <- deploy_cam_visit_occu %>% ungroup() %>% 
@@ -239,8 +249,9 @@ occ.covs.transect.unscaled <- envCovs %>%
   filter(CellID %in% sites.transect) %>% 
   arrange(CellID)
 occ.covs.transect <- occ.covs.transect.unscaled %>% 
-  mutate(across(-CellID, ~ scale(.) %>% as.vector()))
-  
+  mutate(across(!c(CellID, Reserve_Type), ~ scale(.) %>% as.vector()), 
+         Reserve_Type=as.factor(Reserve_Type)) # saved as factor, all other as numeric
+str(occ.covs.transect)  
 
 # for camera data 
 sites.camera <- unique(deploy_cam_visit_occu$CellID) 
@@ -248,7 +259,8 @@ occ.covs.camera.unscaled <- envCovs %>%
   filter(CellID %in% sites.camera) %>% 
   arrange(CellID)
 occ.covs.camera <- occ.covs.camera.unscaled %>% 
-  mutate(across(-CellID, ~ scale(.) %>% as.vector()))  # scale all numeric values 
+  mutate(across(!c(CellID, Reserve_Type), ~ scale(.) %>% as.vector()), # scale all numeric variables
+         Reserve_Type=as.factor(Reserve_Type)) # saved as factor, all other as numeric
   
 # bind everything together 
 occ.covs <- bind_rows(occ.covs.transect, occ.covs.camera)
@@ -341,11 +353,15 @@ n.samples <- 20000
 ## in det try both Date and Date^2
 ## add nested random effect for Season and year as factor in det models 
 
-gc()
+names(occ.covs) # variables for occ submodel
+names(det.covs.transect) # variables for det transect submodel
+names(det.covs.camera) # variables for det camera submodel 
 
-m1 <- intPGOcc(occ.formula = ~ river_density_med_large + Distance_large_river + mean_elev + JRC_transition_Degraded_forest_short_duration_disturbance_after_2014 + JRC_transition_Undisturbed_tropical_moist_forest , #occ.cov, 
-               det.formula = list(transect = ~ Date_Transect + I(Date_Transect^2)  + Transect_Length + Project_Transect + Season_Transect + (1 | Year_Transect), 
-                                  camera = ~ Date_Camera + I(Date_Camera^2) + Trapping_Days + Project_lumped_Camera + Season_Camera + (1 | Year_Camera)), 
+
+gc()
+m1 <- intPGOcc(occ.formula = ~  river_density_med_large + Distance_large_river + mean_elev + JRC_transition_Degraded_forest_short_duration_disturbance_after_2014 + JRC_transition_Undisturbed_tropical_moist_forest , #occ.cov, 
+               det.formula = list(transect = ~ Date_Transect + I(Date_Transect^2)  + Transect_Length + Season_Transect + Project_Transect_fact + (1 | Year_Transect_num), 
+                                  camera = ~ Date_Camera + I(Date_Camera^2) + Trapping_Days + Season_Camera + Project_Focus_fact + (1 | Year_Camera_num)), 
                data = data.list, inits = inits.list, n.samples = n.samples, priors = priors.list, 
                n.omp.threads = 5, # use 5 cores
                verbose = TRUE, # means that messages about processing and computation are printed to console
@@ -456,7 +472,7 @@ ggplot(effect_occu_all) +
 X.0 <- model.matrix(~ river_density_med_large + Distance_large_river + 
                       mean_elev + JRC_transition_Degraded_forest_short_duration_disturbance_after_2014 + 
                       JRC_transition_Undisturbed_tropical_moist_forest, 
-                    data = envCovs_sf %>% st_drop_geometry() %>% mutate(across(everything(),~ scale(.) %>% as.vector())))
+                    data = envCovs_sf %>% select(-Reserve_Type) %>% st_drop_geometry() %>% mutate(across(everything(),~ scale(.) %>% as.vector())))
 
 # predict 
 pred_m1 <- predict(m1, type = 'occupancy', ignore.RE = T, X.0 = X.0)

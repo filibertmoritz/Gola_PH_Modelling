@@ -48,6 +48,7 @@ JRC_ANN_CHANGE <- terra::rast(x = paste0(path, '/JRC_TMF_AnnualChanges2021_GGL.t
 # immediately throw away the stuff which isn't needed
 JRC_ANN_CHANGE_2013 <- JRC_ANN_CHANGE[[c('Dec2013')]] # here select the year that is needed, but then also change it in the if else statement, I think data is only available until Dez2021
 JRC_ANN_CHANGE_2021 <- JRC_ANN_CHANGE[[c('Dec2021')]] # here select the year that is needed, but then also change it in the if else statement, I think data is only available until Dez2021
+JRC_ANN_CHANGE_2017 <- JRC_ANN_CHANGE[[c('Dec2017')]] # as intermediate year 
 rm(JRC_ANN_CHANGE)
 VEG_2013 <-  VEG_2013[[c('"250m 16 days NDVI"', '"250m 16 days EVI"')]]
 VEG_2020 <-  VEG_2020[[c('"250m 16 days NDVI"', '"250m 16 days EVI"')]]
@@ -57,7 +58,7 @@ rivers <- st_read('C:/Users/filib/Documents/Praktika/RSPB/data/spatialdata/Gola_
 study_area <- st_read('C:/Users/filib/Documents/Praktika/RSPB/data/spatialdata/Gola_PH_study_area.shp')
 settlements <- st_read('C:/Users/filib/Documents/Praktika/RSPB/data/spatialdata/Settlements_2021_Points.shp')
 reserves <- st_read('C:/Users/filib/Documents/Praktika/RSPB/data/spatialdata/Greater_Gola_Landscape_2024_polygons.shp')
-# leakage_belt <- st_read('C:/Users/filib/Documents/Praktika/RSPB/data/spatialdata/Leakage_Belt_4km_polygons.shp') # this file does not really help due to its mismatch with the reserves layer:/
+leakage_belt <- st_read('C:/Users/filib/Documents/Praktika/RSPB/data/spatialdata/Gola_Leakage_Belt.shp') # this file does not really help due to its mismatch with the reserves layer:/
 roads <- st_read('C:/Users/filib/Documents/Praktika/RSPB/data/spatialdata/Roads_InProgressGola.shp')
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -70,7 +71,7 @@ target_crs <- crs('EPSG:32629') # set target crs
 for(i in 1:length(spat_rasters)){ # loop over all spatRasters and project to new crs 
     raster <- get(spat_rasters[i])  # get raster from 
     if(crs(raster) != target_crs){
-      if(names(raster)[1] == "TransitionClass" | names(raster)[1] == "DegradationYear" | names(raster)[1] == "Dec2021"| names(raster)[1] == "Dec2013"){ # change Dez2021 here if needed
+      if(names(raster)[1] == "TransitionClass" | names(raster)[1] == "DegradationYear" | names(raster)[1] == "Dec2021"| names(raster)[1] == "Dec2017"| names(raster)[1] == "Dec2013"){ # change Dez2021 here if needed
         raster <- terra::project(raster, target_crs, , method = 'near')  # project to new crs using terra which is rather slow and appropriate handling for classes
         assign(spat_rasters[i], raster, envir = .GlobalEnv)  # save to global environment again
         message(spat_rasters[i], " has been projected to target crs.")
@@ -214,6 +215,7 @@ JRC_transition_stats <- JRC_transition_stats %>% select(CellID, JRC_transition_U
 
 # improve data structure from JRC_ANN_CHANGE - extracted data for Dec2021 which then has values from 1 to 6, legend in https://forobs.jrc.ec.europa.eu/static/tmf/TMF_DataUsersGuide.pdf
 JRC_ANN_CHANGE_2013 <- as.factor(JRC_ANN_CHANGE_2013)
+JRC_ANN_CHANGE_2017 <- as.factor(JRC_ANN_CHANGE_2017)
 JRC_ANN_CHANGE_2021 <- as.factor(JRC_ANN_CHANGE_2021)
 change_names <- data.frame(ID = 1:nrow(levels(JRC_ANN_CHANGE_2013)[[1]]), 
                            label = c('Undisturbed_tropical_moist_forest', 
@@ -223,12 +225,15 @@ change_names <- data.frame(ID = 1:nrow(levels(JRC_ANN_CHANGE_2013)[[1]]),
                                      'Permanent_and_seasonal_water', 
                                      'Other_land_cover'))
 levels(JRC_ANN_CHANGE_2013)[[1]] <- change_names %>% mutate(label = paste(change_names$label, 'Dec2013', sep = '_'))
+levels(JRC_ANN_CHANGE_2017)[[1]] <- change_names %>% mutate(label = paste(change_names$label, 'Dec2017', sep = '_'))
 levels(JRC_ANN_CHANGE_2021)[[1]] <- change_names %>% mutate(label = paste(change_names$label, 'Dec2021', sep = '_'))
 # extract data from JRC_ANN_CHANGE, which are basically rather broad land cover classes!
 plot(JRC_ANN_CHANGE_2021); plot(JRC_ANN_CHANGE_2013)
 JRC_ann_changes_2013_stats <- exactextractr::exact_extract(JRC_ANN_CHANGE_2013, grid_sf, fun = 'weighted_frac', weights = 'area', append_cols = 'CellID')
+JRC_ann_changes_2017_stats <- exactextractr::exact_extract(JRC_ANN_CHANGE_2017, grid_sf, fun = 'weighted_frac', weights = 'area', append_cols = 'CellID')
 JRC_ann_changes_2021_stats <- exactextractr::exact_extract(JRC_ANN_CHANGE_2021, grid_sf, fun = 'weighted_frac', weights = 'area', append_cols = 'CellID')
 names(JRC_ann_changes_2013_stats) <- c('CellID', paste('JRC_ann_changes', change_names$label, 'Dec2013', sep = '_'))
+names(JRC_ann_changes_2017_stats) <- c('CellID', paste('JRC_ann_changes', change_names$label, 'Dec2017', sep = '_'))
 names(JRC_ann_changes_2021_stats) <- c('CellID', paste('JRC_ann_changes', change_names$label, 'Dec2021', sep = '_'))
 
 
@@ -239,6 +244,7 @@ grid_sf <- grid_sf %>%
   left_join(veg_13, join_by(CellID)) %>% 
   left_join(veg_20, join_by(CellID)) %>% 
   left_join(JRC_ann_changes_2013_stats, join_by(CellID)) %>% 
+  left_join(JRC_ann_changes_2017_stats, join_by(CellID)) %>% 
   left_join(JRC_ann_changes_2021_stats, join_by(CellID)) %>% 
   left_join(JRC_transition_stats, join_by(CellID)) %>%
   mutate(mean_elev = elev_mean, 
@@ -268,143 +274,64 @@ grid_sf <- grid_sf %>% left_join(river_length_med_large, join_by(CellID)) %>%
 
 
 
-# distance to settlement, to large river
+# distance to settlement, to large river, to road, to footpath/track and thoroughfares
 dist_settle <- st_distance(grid_sf, settlements, which = 'Euclidean') %>% # gives a distance matrix
   apply(1, min) 
 dist_large_river <- st_distance(grid_sf, rivers %>% filter(River_Size == 'Large'), which = 'Euclidean') %>% # calc dist to large, main river streams
   apply(1, min) 
+dist_road <- st_distance(grid_sf, roads %>% filter(Category == 'Road'), which = 'Euclidean') %>% # calc dist to roads
+  apply(1, min) 
+dist_track_path <- st_distance(grid_sf, roads %>% filter(Category %in% c('Footpath', 'Track')), which = 'Euclidean') %>% # calc dist to footpaths and tracks
+  apply(1, min)
+dist_thoroughfares <- st_distance(grid_sf, roads, which = 'Euclidean') %>% # calc dist to any type of road, track and footpaths
+  apply(1, min)
+
 grid_sf <- grid_sf %>% mutate(Distance_settlement = set_units(dist_settle, m), 
-                              Distance_large_river = set_units(dist_large_river, m)) 
+                              Distance_large_river = set_units(dist_large_river, m), 
+                              Distance_road = set_units(dist_road, m), 
+                              Distance_track_path = set_units(dist_track_path, m), 
+                              Distance_thoroughfares = set_units(dist_thoroughfares, m)) 
 
-
-###############################################################################
-##### CONTINUE HERE TO CREATE A LEAKAGE BELT ##################################
-###############################################################################
 
 # location in forest reserve, national park, community forest or outside 
 reserves <- reserves %>% rename(Name = NAME, Reserve_Type = DESIG) %>% 
   filter(Name %in% c('Gola North', 'Gola South', 'Gola Central', 'Bunumbu', 'Tiwai Island Sanctuary', 'Kambui South', 'Kambui Hills and Extensions')) %>% 
   select(Name, Reserve_Type) %>% 
+  st_zm() %>% # remove z dimension
   st_cast('POLYGON')# clean shp file up 
-leakage_belt <- st_buffer(reserves %>% filter(Name %in% c('Gola North', 'Gola South', 'Gola Central')), dist = 4000) %>% 
-  st_union() %>% # not sure if this is smart though
-  st_cast('POLYGON') %>% st_as_sf() %>% # this is only needed if st_union is applied
-  mutate(Reserve_Type = 'Leakage Belt', 
-         Name = c('Gola South', 'Gola Central and North'))
 
-# plot reserves and buffer area
-tmap_mode(mode = 'view')
-tm_shape(leakage_belt) +
-  tm_polygons(fill='orange') +
-tm_shape(reserves) +
-  tm_polygons(fill = 'red') +
-tm_shape(grid_sf) +
-  tm_polygons(fill_alpha = 0)
+# tidy up the leakage belt shp and make it fit the reserves sf
+leakage_belt <- leakage_belt %>% select(geometry) %>% mutate(Name = 'Gola', Reserve_Type = 'Leakage Belt')
 
-################################################################################
-#### THIS WORKS MORE OR LESS ###############
-################################################################################
+# bring leakage belt and 
+reserves_lk_belt <- bind_rows(reserves, leakage_belt)
 
 # prepare area of reserve types per grid cell 
-location_res <- st_intersection(reserves, grid_sf) %>% select(CellID, Reserve_Type) %>% 
+location <- st_intersection(reserves_lk_belt %>% st_transform(32629), grid_sf) %>% select(CellID, Reserve_Type) %>% 
   mutate(area = set_units(st_area(.), km^2))%>% 
   group_by(CellID, Reserve_Type) %>% 
-  summarise(area_np = sum(area)) %>% 
+  summarise(area = sum(area)) %>% 
   group_by(CellID) %>%
-  slice_max(area_np, n = 1) # this removes the reserve types which are not dominant / have the most area in a grid cell
+  slice_max(area, n = 1)#  %>% mutate(CellID = as.numeric(CellID))
 
-# prepare area of leakage belt per grid cell
-location_leak <- st_intersection(leakage_belt, grid_sf) %>% select(CellID, Reserve_Type) %>% 
-  mutate(area = set_units(st_area(.), km^2))%>% # View()
-  group_by(CellID, Reserve_Type) %>% 
-  summarise(area_lk = sum(area)) %>% 
-  group_by(CellID) %>%
-  slice_max(area_lk, n = 1)
+# join back to grid and assign Reserve Type for outside if the area which is outside any reserve or leakage belt is larger than inside
+loc <- grid_sf %>% select(area, CellID) %>%
+  left_join(location %>% select(Reserve_Type, CellID, area_l = area) %>% st_drop_geometry(), join_by(CellID)) %>% 
+  mutate(area = as.numeric(area), area_l = as.numeric(area_l),
+         area_out = area- area_l, 
+         area_out = as.numeric(if_else(is.na(area_out), area, area_out)), 
+         Reserve_Type = if_else(is.na(Reserve_Type), 'Outside', Reserve_Type), 
+         Reserve_Type = if_else(as.numeric(area_out) > (area/2), 'Outside', Reserve_Type)) 
 
-location_outside <- grid_sf %>% 
-  rename(area_out = area) %>% 
-  select(CellID, area_out)
+# join data back to grid
+grid_sf <- grid_sf %>% left_join(loc %>% select(CellID, Reserve_Type) %>% st_drop_geometry(), join_by(CellID))
 
-# bring all data together
-location <- location_outside %>%
-  left_join(location_leak %>% st_drop_geometry() %>% select(-Reserve_Type), join_by(CellID)) %>%
-  left_join(location_res %>% st_drop_geometry(), join_by(CellID))
-
-# calc area depending on what I need
-location_area <- location %>% 
-  mutate(across(where(~inherits(., "units")), ~replace_na(., set_units(0, km^2)))) %>%
-  mutate(area_lk = drop_units(area_lk),  
-         area_np = drop_units(area_np),  
-         area_out = drop_units(area_out), 
-         area_out = area_out - area_lk,
-         Reserve_Type_new = case_when(
-           area_np > area_lk ~ Reserve_Type,
-           area_lk > area_out ~ "Leakage Belt",
-           area_out > 2 & area_out < 3 ~ "Outside",
-           area_np > 1.5 & Reserve_Type == 'National Park'~ Reserve_Type,
-           area_np > 1 & Reserve_Type != 'National Park'~ Reserve_Type,
-           TRUE ~ "Outside"))
-library(tmap)
-tm_shape(leakage_belt) +
-  tm_polygons(fill='orange') +
-  tm_shape(reserves) +
-  tm_polygons(fill = 'red') +
-  tm_shape(location_area) +
-  tm_polygons(fill = 'Reserve_Type', fill_alpha = 0.4)
-
-################################################################################
-##### STOP HERE ##############################################
-################################################################################
-
-####### THIS IS ANOTHER TRAIL WHICH DOES NOT WORK YET ############
-
-# prepare area of reserve types per grid cell 
-#location_res <- st_intersection(reserves, grid_sf) %>% select(CellID, Reserve_Type) %>% 
-#  mutate(area = st_area(.))%>% 
-#  group_by(CellID, Reserve_Type) %>% 
-#  summarise(area_np = sum(area)) %>% 
-#  group_by(CellID) %>%
-#  slice_max(area_np, n = 1) # this removes the reserve types which are not dominant / have the most area in a grid cell
-
-# prepare area of leakage belt per grid cell
-#location_leak <- st_intersection(leakage_belt, grid_sf) %>% select(CellID, Reserve_Type) %>% 
-#  mutate(area = st_area(.))%>% # View()
-#  group_by(CellID, Reserve_Type) %>% 
-#  summarise(area_lk = sum(area)) %>% 
-#  group_by(CellID) %>%
-#  slice_max(area_lk, n = 1)
-
-#location_outside <- grid_sf %>% mutate(area = as.numeric(area)) %>%
-#  rename(area_out = area) %>% 
-#  select(CellID, area_out)
-
-# bring all data together
-#location <- location_outside %>%
-#    left_join(location_leak %>% st_drop_geometry() %>% select(-Reserve_Type), join_by(CellID)) %>%
-#    left_join(location_res %>% st_drop_geometry(), join_by(CellID))
-
-# calc area depending on what I need
-#location_area <- location %>% 
-#  mutate(area_out = area_out - area_lk, 
-#         area_lk = area_lk - area_np) %>% 
-#  mutate(case_when(area_np>1~Reserve_Type, 
-#                   as.numeric(area_np)<1~'Outside', 
-#                   as.numeric(area_lk)>1~'Leakage_Belt'))
-
-
-library(tmap)
-tm_shape(leakage_belt) +
-  tm_polygons(fill='orange') +
-  tm_shape(reserves) +
-  tm_polygons(fill = 'red') +
-  tm_shape(location_area) +
-  tm_polygons(fill = 'Reserve_Type', fill_alpha = 0.4)
-
-
-#########################################################
-##### STOPPED HERE #####################################
-#########################################################
-
+# check that everything went okay 
+#tmap_mode(mode = 'view')
+#tm_shape(reserves_lk_belt) +
+#  tm_polygons(fill='Reserve_Type') +
+#tm_shape(grid_sf) +
+#  tm_polygons(fill = 'Reserve_Type', fill_alpha = 0.4)
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

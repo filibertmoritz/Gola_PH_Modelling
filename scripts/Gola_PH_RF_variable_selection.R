@@ -188,103 +188,6 @@ colnames(pred) <- str_remove_all(colnames(pred), 'JRC_transition_')
 str(pred)
 
 
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-###### 6.1. Correlation analysis using #####
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-#################################################################################
-##### FROM HERE CORRELATION ISSUE HAS TO BE REVISED ############################
-#################################################################################
-
-# calculate pairwise correlation and remove variables above certain threshold (between 0.5 to 0.7 - Dormann 2017)
-
-# calculate correlation matrix 
-cor.mat <- cor(as.matrix(pred[, sapply(pred, is.numeric)])) # uses only numeric predictors
-
-# create corplot
-library(corrplot)
-corrplot(cor.mat,  type = 'lower')
-
-# set threshold for high correlation
-threshold <- 0.6 # conservative value
-
-# get upper triangle of correlation matrix (to avoid duplicates)
-upper_tri <- cor.mat2
-upper_tri[lower.tri(upper_tri, diag = TRUE)] <- NA
-
-# Find indices of highly correlated pairs
-high_corr_idx <- which(abs(upper_tri) > threshold, arr.ind = TRUE) # abs handles both - positive and negative correlation
-
-# bring data together in a df 
-high_corr_pairs <- data.frame(
-  var1 = rownames(upper_tri)[high_corr_idx[, 1]],
-  var2 = colnames(upper_tri)[high_corr_idx[, 2]],
-  correlation = cor.mat2[high_corr_idx])
-
-# check result
-print(high_corr_pairs)
-
-# remove redundant predictors 
-pred_new <- pred %>% select(-EVI_2020, -Undisturbed_tropical_moist_forest, -Degraded_tropical_moist_forest_Dec2017, -Tropical_moist_forest_regrowth_Dec2017, -Distance_thoroughfares, -Deforested_land_Dec2017, -Degraded_forest_long_duration_disturbance_after_2014, -Other_land_cover_Dec2017, -Degraded_forest_2_3_degradation_periods_after_2014)
-cor.mat2 <- cor(as.matrix(pred_new[, sapply(pred_new, is.numeric)])) 
-corrplot(cor.mat2)
-
-# get names of new predictors 
-new_predictors <- colnames(pred_new)
-
-# ALTERNATIVE approach for selecting variables using the correlation - I don't really understand why certain variables are removed and others not! 
-
-# find highly correlated variables 
-library(caret)
-red_var <- findCorrelation(cor.mat, cutoff = 0.5)
-names(pred)[-red_var]
-
-
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-###### 6.2. Variance inflation factor #####
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-# From the manual for the usdm package "Collinearity causes instability in parameter estimation in regression-type models. The VIF is based on the square of the multiple correlation coefficient resulting from regressing a predictor variable against all other predictor variables. If a variable has a strong linear relationship with at least one of the other variables, the correlation coefficient will be close to 1, and VIF for that variable would be large."
-# Two options for VIFs: vifcor and vifstep. The latter is the option used by Geue & Thomassen (2020) Functions "exclude highly collinear variables in a stepwise procedure".
-# "vifcor" first finds the pair of variables with the maximum linear correlation (greater than "th" threshold), and excludes the one with the greater VIF. The procedure is repeated until no variable has a high correlation coefficient (greater than threshold) with other variables.
-# "vifstep" calculates the VIF for all variables, excludes the one with highest VIF (greater than threshold), and repeats the procedure until no variables with VIF greater than "th" remains.
-# In Species Distribution Modelling the norm is to retain predictors with VIFs of < 10. In other modelling areas, then ViFs of 3 or 5 are more normal.
-
-# Check the original paper for the package: Naimi et al. (2014) https://doi.org/10.1111/j.1600-0587.2013.00205.x
-# Also Geue & Thomassen (2020), where it is used in a SDM https://doi.org/10.1002/ece3.6232
-
-# load necessary package
-library(usdm)
-
-options(scipen = 999) # swith scientific notation off 
-set.seed(123) # Not certain if there is random process? Results seem to vary?
-
-# Predictors can only be numeric
-VIF.STEP <- vifstep(pred[, sapply(pred, is.numeric)], th = 4)
-VIF.COR <- vifcor(pred[, sapply(pred, is.numeric)], th = 0.6)
-
-# have a look at outputs 
-summary(VIF.STEP)
-VIF.STEP@results
-VIF.COR@results
-
-# Returns a VIF object, examine different outputs.
-VIF.STEP.MATRIX <- data.frame(VIF.STEP@corMatrix)
-VIF.COR.MATRIX <- data.frame(VIF.COR@corMatrix)
-
-# Check which variables are still included.
-colnames(pred)
-row.names(VIF.STEP.MATRIX)
-row.names(VIF.COR.MATRIX)
-
-VIF.COR@excluded
-
-#################################################################################
-##### UNTIL HERE CORRELATION ISSUE HAS TO BE REVISED ############################
-#################################################################################
-
-
-
 
 
 
@@ -308,50 +211,9 @@ traindata <- data %>%
   st_drop_geometry()
 
 
-
-
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ##### 8. Train random forest model and compute variable importance #####
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-str(traindata)
-new_predictors
-
-# random forest without consideration of effort in party 
-crf1 <- cforest(
-  formula = as.factor(Occu) ~ NDVI_2020 + EVI_2020 +
-    mean_elev + mean_slope +
-    JRC_ann_changes_Undisturbed_tropical_moist_forest_Dec2017 + JRC_ann_changes_Degraded_tropical_moist_forest_Dec2017 +
-    JRC_ann_changes_Deforested_land_Dec2017 + JRC_ann_changes_Tropical_moist_forest_regrowth_Dec2017 +
-    JRC_ann_changes_Permanent_and_seasonal_water_Dec2017 + JRC_ann_changes_Other_land_cover_Dec2017 +
-    JRC_transition_Undisturbed_tropical_moist_forest + JRC_transition_Degraded_forest_short_duration_disturbance_before_2014 +
-    JRC_transition_Degraded_forest_short_duration_disturbance_after_2014 + JRC_transition_Degraded_forest_long_duration_disturbance_before_2014 +
-    JRC_transition_Degraded_forest_long_duration_disturbance_after_2014 + JRC_transition_Degraded_forest_2_3_degradation_periods_before_2014 +
-    JRC_transition_Degraded_forest_2_3_degradation_periods_after_2014 + JRC_transition_Regrowth_desturbed_between_2004_2013 +
-    JRC_transition_Regrowth_desturbed_between_2014_2020 +
-    Distance_settlement + Distance_road + Distance_track_path + Distance_thoroughfares +
-    Distance_large_river + river_density_med_large +
-    Reserve_Type +
-    TransectEffort + CameraEffort,
-  data = traindata, 
-  controls = cforest_control(ntree = 2000))
-
-
-# calculate variable importance using permimp package - https://cran.r-project.org/web/packages/permimp/permimp.pdf
-vi <- permimp(crf1) # 
-ggVarImp(vi1) # from moreparty package 
-
-# calculate variable importance using varImp package 
-vi1 <- varImp(crf1)
-vi2 <- varImpAUC(crf1) # 
-vi3 <- varImpAUC(crf1, conditional = T) # not quite sure what to use 
-vi4 <- fastvarImp(crf1, conditional = T, parallel = T) # faster implementation with parallel computation to be set in parallel = T
-vi5 <- varimp(crf1, conditional = T) # to account for multicollinearity in predictors https://www.listendata.com/2015/04/shortcomings-in-random-forest-variable.html
-
-
-plot(vi2)
-
-
-
 
 # Steffen recommended two options to include effort as an 'offset' into the random forest model: 
 #   1)  Incorporate effort in the response: divide the number of hippo sightings by the effort (in days or so), 
@@ -375,6 +237,78 @@ plot(vi2)
 #     c)  Use effort as weights? 
 #     d)  Valavi et al. 2023: class overlap (presence/absence is not clearly distinguishable by one variable - common for changes in occupancy across ecological gradients and rare species)
 #         - solutions in paper, also example code
+
+
+
+
+# get all predictors from data set
+pred <- traindata %>% 
+  select(-CellID, -area, -NDVI_2013, -EVI_2013, -matches("2021|2013|Effort"), -Occu) %>% # remove a few predictors which aren't needed
+  colnames()
+
+# built formulas
+f_without_effort <- as.formula(paste('as.factor(Occu)', "~", paste(pred, collapse = " + "))) # classification RF without consideration of survey effort 
+f_with_effort_pred <- as.formula(paste('as.factor(Occu)', "~", paste(pred, collapse = " + "), '+ Effort')) # classification RF with consideration of survey effort as predictor variable
+f_with_effort_response <- as.formula(paste('Occu_Effort', "~", paste(pred, collapse = " + "))) # regression random forest with consideration by modelling Occu-Effort ratio as response variable
+
+# preparation to built fr in loop
+formulas <- list(f_without_effort, f_with_effort_pred, f_with_effort_response) # save all formulas in a list
+names(formulas) <- c('f_without_effort', 'f_with_effort_pred', 'f_with_effort_response')
+models <- list() # initial list for model objects 
+i <- 1 # as manual counter
+
+# build random forests in a loop 
+for(f in formulas){
+  model_name <- paste0('cr', names(formulas)[i])
+  models[[model_name]] <- cforest(formula =  f,
+    data = traindata, 
+    controls = cforest_control(ntree = 2000, 
+                               mtry = length(attr(terms(f), "term.labels"))/2)) # calculates number of predictors and divides by 2
+  i <- i+1 # count 1 further
+}
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##### 9. Calculate AUC Variable Importance for each RF #####
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# there are mainly 3 packages to calculate variable importance from cforest objects:
+## 1. permimp - https://cran.r-project.org/web/packages/permimp/permimp.pdf
+# permimp(crf1)
+## 2. party - 
+# party::varImpAUC(crf1, conditional = T)# or without conditional
+## 3. moreparty - 
+# # moreparty::fastvarImpAUC(crf1, conditional = T, parallel = T)# or without conditional
+
+
+
+# be aware that this takes some time!
+
+# calculate AUC Variable importance 10 times for each model 
+results_vip <- as.data.frame(matrix(ncol = 4))
+names(results_vip) <- c('model', 'iter', 'variable', 'importance')
+
+for(m_names in names(models)){
+  m <- models[[m_names]]
+  for(n in 1:10){
+    v <- party::varimpAUC(m)
+    r <- data.frame(model = m_names, iter = n, variable = names(v), importance = v)
+    results_vip <- rbind(results_vip, r)
+  }
+}
+
+# calculate mean varImp per model and variable
+vimp_mean <- results_vip %>% 
+  group_by(model, variable) %>% 
+  summarise(mean_importance = mean(importance))
+
+# make plot out of curiosity
+
+
+
+
+
+#################################################################################
+################################################################################
 
 
 # 1) Incorporate effort in the response
@@ -637,3 +571,107 @@ ggplot(data %>% filter(Occu == 1 | Effort > 0)) +
        x = 'Predicted Occupancy', y = 'Mean Elevation per Grid Cell', color = 'True Occurence') +
   theme_bw()
 
+
+
+
+
+
+
+
+
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+###### 6.1. Correlation analysis using #####
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#################################################################################
+##### FROM HERE CORRELATION ISSUE HAS TO BE REVISED ############################
+#################################################################################
+
+# calculate pairwise correlation and remove variables above certain threshold (between 0.5 to 0.7 - Dormann 2017)
+
+# calculate correlation matrix 
+cor.mat <- cor(as.matrix(pred[, sapply(pred, is.numeric)])) # uses only numeric predictors
+
+# create corplot
+library(corrplot)
+corrplot(cor.mat,  type = 'lower')
+
+# set threshold for high correlation
+threshold <- 0.6 # conservative value
+
+# get upper triangle of correlation matrix (to avoid duplicates)
+upper_tri <- cor.mat2
+upper_tri[lower.tri(upper_tri, diag = TRUE)] <- NA
+
+# Find indices of highly correlated pairs
+high_corr_idx <- which(abs(upper_tri) > threshold, arr.ind = TRUE) # abs handles both - positive and negative correlation
+
+# bring data together in a df 
+high_corr_pairs <- data.frame(
+  var1 = rownames(upper_tri)[high_corr_idx[, 1]],
+  var2 = colnames(upper_tri)[high_corr_idx[, 2]],
+  correlation = cor.mat2[high_corr_idx])
+
+# check result
+print(high_corr_pairs)
+
+# remove redundant predictors 
+pred_new <- pred %>% select(-EVI_2020, -Undisturbed_tropical_moist_forest, -Degraded_tropical_moist_forest_Dec2017, -Tropical_moist_forest_regrowth_Dec2017, -Distance_thoroughfares, -Deforested_land_Dec2017, -Degraded_forest_long_duration_disturbance_after_2014, -Other_land_cover_Dec2017, -Degraded_forest_2_3_degradation_periods_after_2014)
+cor.mat2 <- cor(as.matrix(pred_new[, sapply(pred_new, is.numeric)])) 
+corrplot(cor.mat2)
+
+# get names of new predictors 
+new_predictors <- colnames(pred_new)
+
+# ALTERNATIVE approach for selecting variables using the correlation - I don't really understand why certain variables are removed and others not! 
+
+# find highly correlated variables 
+library(caret)
+red_var <- findCorrelation(cor.mat, cutoff = 0.5)
+names(pred)[-red_var]
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+###### 6.2. Variance inflation factor #####
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# From the manual for the usdm package "Collinearity causes instability in parameter estimation in regression-type models. The VIF is based on the square of the multiple correlation coefficient resulting from regressing a predictor variable against all other predictor variables. If a variable has a strong linear relationship with at least one of the other variables, the correlation coefficient will be close to 1, and VIF for that variable would be large."
+# Two options for VIFs: vifcor and vifstep. The latter is the option used by Geue & Thomassen (2020) Functions "exclude highly collinear variables in a stepwise procedure".
+# "vifcor" first finds the pair of variables with the maximum linear correlation (greater than "th" threshold), and excludes the one with the greater VIF. The procedure is repeated until no variable has a high correlation coefficient (greater than threshold) with other variables.
+# "vifstep" calculates the VIF for all variables, excludes the one with highest VIF (greater than threshold), and repeats the procedure until no variables with VIF greater than "th" remains.
+# In Species Distribution Modelling the norm is to retain predictors with VIFs of < 10. In other modelling areas, then ViFs of 3 or 5 are more normal.
+
+# Check the original paper for the package: Naimi et al. (2014) https://doi.org/10.1111/j.1600-0587.2013.00205.x
+# Also Geue & Thomassen (2020), where it is used in a SDM https://doi.org/10.1002/ece3.6232
+
+# load necessary package
+library(usdm)
+
+options(scipen = 999) # swith scientific notation off 
+set.seed(123) # Not certain if there is random process? Results seem to vary?
+
+# Predictors can only be numeric
+VIF.STEP <- vifstep(pred[, sapply(pred, is.numeric)], th = 4)
+VIF.COR <- vifcor(pred[, sapply(pred, is.numeric)], th = 0.6)
+
+# have a look at outputs 
+summary(VIF.STEP)
+VIF.STEP@results
+VIF.COR@results
+
+# Returns a VIF object, examine different outputs.
+VIF.STEP.MATRIX <- data.frame(VIF.STEP@corMatrix)
+VIF.COR.MATRIX <- data.frame(VIF.COR@corMatrix)
+
+# Check which variables are still included.
+colnames(pred)
+row.names(VIF.STEP.MATRIX)
+row.names(VIF.COR.MATRIX)
+
+VIF.COR@excluded
+
+#################################################################################
+##### UNTIL HERE CORRELATION ISSUE HAS TO BE REVISED ############################
+#################################################################################

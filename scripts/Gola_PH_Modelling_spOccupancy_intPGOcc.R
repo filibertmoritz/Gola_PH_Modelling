@@ -359,9 +359,9 @@ names(det.covs.camera) # variables for det camera submodel
 
 
 gc()
-m1 <- intPGOcc(occ.formula = ~  river_density_med_large + Distance_large_river + mean_elev + JRC_transition_Degraded_forest_short_duration_disturbance_after_2014 + JRC_transition_Undisturbed_tropical_moist_forest , #occ.cov, 
+m1 <- intPGOcc(occ.formula = ~  river_density_med_large + Distance_large_river + mean_elev + JRC_transition_Degraded_forest_short_duration_disturbance_after_2014 + JRC_transition_Undisturbed_tropical_moist_forest + EVI_2020 + Distance_settlement, #occ.cov, 
                det.formula = list(transect = ~ Date_Transect + I(Date_Transect^2)  + Transect_Length + Season_Transect + Project_Transect_fact + (1 | Year_Transect_num), 
-                                  camera = ~ Date_Camera + I(Date_Camera^2) + Trapping_Days + Season_Camera + Project_Focus_fact + (1 | Year_Camera_num)), 
+                                  camera = ~ Date_Camera + I(Date_Camera^2) + Trapping_Days + Season_Camera + Project_Camera + (1 | Year_Camera_num)), 
                data = data.list, inits = inits.list, n.samples = n.samples, priors = priors.list, 
                n.omp.threads = 5, # use 5 cores
                verbose = TRUE, # means that messages about processing and computation are printed to console
@@ -400,7 +400,7 @@ ppc_m1_df <- data.frame(fit = ppc_m1$fit.y[[2]],
                             color = 'lightskyblue1')
 ppc_m1_df$color[ppc_m1_df$fit.rep > ppc_m1_df$fit] <- 'lightsalmon'
 plot(ppc_m1_df$fit, ppc_m1_df$fit.rep, bg = ppc_m1_df$color, pch = 21, 
-     ylab = 'Fit', xlab = 'True', main = 'Transect Data')
+     ylab = 'Fit', xlab = 'True', main = 'Camera Data bay p-val 0.2071')
 lines(ppc_m1_df$fit, ppc_m1_df$fit, col = 'black')
 
 # lets have a look if there are any very influential data points 
@@ -434,7 +434,9 @@ const_val <- data.frame(`(Intercept)` = rep(1, n),
                        Distance_large_river = rep(mean(occ.covs$Distance_large_river), length.out = n), 
                        mean_elev = rep(mean(occ.covs$mean_elev), length.out = n), 
                        JRC_transition_Degraded_forest_short_duration_disturbance_after_2014 = rep(mean(occ.covs$JRC_transition_Degraded_forest_short_duration_disturbance_after_2014), length.out = n), 
-                       JRC_transition_Undisturbed_tropical_moist_forest = rep(mean(occ.covs$JRC_transition_Undisturbed_tropical_moist_forest), length.out = n))
+                       JRC_transition_Undisturbed_tropical_moist_forest = rep(mean(occ.covs$JRC_transition_Undisturbed_tropical_moist_forest), length.out = n), 
+                       EVI_2020 = rep(mean(occ.covs$EVI_2020), length.out = n), 
+                       Distance_settlement = rep(mean(occ.covs$Distance_settlement), length.out = n))
 effect_occu_all <- data.frame() # initialise df
 occ.var <- colnames(m1$X)[2:dim(m1$X)[2]] # get all variables used in occu fomula, except of intercept
 for(var in occ.var){
@@ -471,7 +473,7 @@ ggplot(effect_occu_all) +
 # create model matrix
 X.0 <- model.matrix(~ river_density_med_large + Distance_large_river + 
                       mean_elev + JRC_transition_Degraded_forest_short_duration_disturbance_after_2014 + 
-                      JRC_transition_Undisturbed_tropical_moist_forest, 
+                      JRC_transition_Undisturbed_tropical_moist_forest + EVI_2020 + Distance_settlement, 
                     data = envCovs_sf %>% select(-Reserve_Type) %>% st_drop_geometry() %>% mutate(across(everything(),~ scale(.) %>% as.vector())))
 
 # predict 

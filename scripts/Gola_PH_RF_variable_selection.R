@@ -210,6 +210,13 @@ traindata <- data %>%
   filter(Occu == 1 | Effort > 0) %>% # this filters for all cases where Effort > 0 and also includes all grid cells with presences (to correctly handle presence-only data)
   st_drop_geometry()
 
+# create a separate response variable which a) incorporates the Effort but b) doesn't become Inf from dividing by 0
+traindata <- traindata %>% 
+  mutate(# Effort_manipulated = if_else(Occu == 1 & Effort == 0, 0.0001, Effort), # if effort is 0 but an opportunistic presence occured, this ensures, that no Inf occures! ITS A BIT CRUDE
+         CameraEffort_Time = as.numeric(CameraEffort_Time), 
+         TransectEffort_Length = as.numeric(TransectEffort_Length),
+         Occu_Effort = Occu*Effort) # divide Occu by Effort (if presence-only data considered - unse Effort_manipulated instead)
+
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ##### 8. Train random forest model and compute variable importance #####
@@ -248,12 +255,12 @@ pred <- traindata %>%
 
 # built formulas
 f_without_effort <- as.formula(paste('as.factor(Occu)', "~", paste(pred, collapse = " + "))) # classification RF without consideration of survey effort 
-f_with_effort_pred <- as.formula(paste('as.factor(Occu)', "~", paste(pred, collapse = " + "), '+ Effort')) # classification RF with consideration of survey effort as predictor variable
-f_with_effort_response <- as.formula(paste('Occu_Effort', "~", paste(pred, collapse = " + "))) # regression random forest with consideration by modelling Occu-Effort ratio as response variable
+f_effort_pred <- as.formula(paste('as.factor(Occu)', "~", paste(pred, collapse = " + "), '+ Effort')) # classification RF with consideration of survey effort as predictor variable
+f_occu_effort_response <- as.formula(paste('Occu_Effort', "~", paste(pred, collapse = " + "))) # regression random forest with consideration by modelling Occu-Effort ratio as response variable
 
 # preparation to built fr in loop
-formulas <- list(f_without_effort, f_with_effort_pred, f_with_effort_response) # save all formulas in a list
-names(formulas) <- c('f_without_effort', 'f_with_effort_pred', 'f_with_effort_response')
+formulas <- list(f_without_effort, f_effort_pred, f_occu_effort_response) # save all formulas in a list
+names(formulas) <- c('f_without_effort', 'f_effort_pred', 'f_occu_effort_response')
 models <- list() # initial list for model objects 
 i <- 1 # as manual counter
 
@@ -284,29 +291,127 @@ for(f in formulas){
 # be aware that this takes some time!
 
 # calculate AUC Variable importance 10 times for each model 
-results_vip <- as.data.frame(matrix(ncol = 4))
-names(results_vip) <- c('model', 'iter', 'variable', 'importance')
+results_vip <- data.frame(model = factor(), iter = numeric(), variable = character(), impoertance = numeric())
 
 for(m_names in names(models)){
   m <- models[[m_names]]
-  for(n in 1:10){
-    v <- party::varimpAUC(m)
+  for(n in 1:10){ # this could also be done in nperm within varImpAUC, however it may not be 
+    if(grepl("as\\.factor", as.character(m@data@formula$response[2]))){
+      v <- moreparty::fastvarImpAUC(m, conditional = 0, parallel = T)} # v <- party::varimpAUC(m, conditional = T) # alternatively moreparty::varImpAUC(m, conditional = 0, parallel = T) or varImp::varImpAUC
+    else{
+      v <- party::varimp(m, conditional = T)} # use normal varImp since AUC is not possible in regression classifications 
     r <- data.frame(model = m_names, iter = n, variable = names(v), importance = v)
     results_vip <- rbind(results_vip, r)
   }
 }
 
-# calculate mean varImp per model and variable
-vimp_mean <- results_vip %>% 
+# calculate mean AUC varImp per model and variable
+results_vip <- results_vip %>% 
   group_by(model, variable) %>% 
-  summarise(mean_importance = mean(importance))
+  mutate(mean_importance = mean(importance))
 
 # make plot out of curiosity
 
+# only the means 
+ggplot(results_vip, aes(x = reorder(variable, mean_importance), y = mean_importance)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  facet_wrap(~ model, scales = "free") +
+  labs(
+    x = "Variable",
+    y = "Mean AUC-based Importance",
+    title = "Variable Importance by Model") +
+  theme_minimal(base_size = 13)
+
+# means and single varImps together
+ggplot(results_vip) +
+  # Grey jittered points: individual importance scores
+  geom_point(aes(x = reorder(variable, mean_importance), y = importance),
+             color = "grey20", alpha = 0.5, size = 1.5,
+             position = position_jitter(width = 0.2)) +
+  # Red vertical lines from 0 to mean importance
+  geom_segment(aes(x = reorder(variable, mean_importance), xend = reorder(variable, mean_importance),
+                   y = 0, yend = mean_importance),
+               color = "red", linewidth = 1) +
+  # Red mean points
+  geom_point(aes(x = reorder(variable, mean_importance), y = mean_importance),
+             color = "red", size = 1.5) +
+  coord_flip() +
+  facet_wrap(~ model, scales = "free") +
+  labs(x = "Variable",
+    y = "AUC-based Importance",
+    title = "Variable Importance per Model",
+    subtitle = "Grey dots: individual runs (n = 10); Red line + dot: mean importance") +
+  theme_minimal(base_size = 13)
+
+ggplot(results_vip) +
+  geom_point(aes(x = reorder(variable, mean_importance), y = importance),
+             color = "grey20", alpha = 0.5, size = 1.5,
+             position = position_jitter(width = 0.2)) +
+  geom_segment(aes(x = reorder(variable, mean_importance), xend = reorder(variable, mean_importance),
+                   y = 0, yend = mean_importance),
+               color = "red", linewidth = 1) +
+  geom_point(aes(x = reorder(variable, mean_importance), y = mean_importance),
+             color = "red", size = 1.5) +
+  coord_flip() +
+  facet_grid(. ~ model, scales = "free", switch = "y") +  # key change
+  labs(x = "Variable",
+       y = "AUC-based Importance",
+       title = "Variable Importance per Model",
+       subtitle = "Grey dots: individual runs (n = 10); Red line + dot: mean importance") +
+  theme_minimal(base_size = 13) +
+  theme(strip.placement = "outside")
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##### 10. Forward variable selection #####
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# consecutively select best variables to add them to the model and compare via AUC 
+
+# follow the structure which has been applied in Bradter et al. 2022 - https://www.cambridge.org/core/journals/environmental-data-science/article/variable-ranking-and-selection-with-random-forest-for-unbalanced-data/D00D9D74FA395B4FAC8886A84CC2FCCA
+
+# this is not implemented here! 
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##### 11. Recursive Feature Selection #####
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# this makes things much easier 
+
+# moreparty::FeatureSelection(Y = traindata$Occu, 
+#                             X = traindata %>% select(-CellID, -area, -NDVI_2013, -EVI_2013, -matches("2021|2013|Effort"), -Occu), 
+#                             method = 'RFE', ntree = 1000)
+
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##### 12. Select all 10 best variables per RF #####
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# select 10 best predictors from all models 
+best_pred <- results_vip %>% group_by(model, variable) %>% 
+  summarise(mean_importance = mean(importance)) %>%
+  slice_max(order_by = mean_importance, n = 6) %>% pull(variable) %>% unique()
+best_pred <- best_pred[best_pred != 'Effort'] # exclude effort
+# best_pred <- best_pred[best_pred != 'Reserve_Type'] # exclude Reserve_Type which is categorial
+
+# check for correlation between best predictors
+
+traindata[, best_pred] %>% st_drop_geometry() %>% cor() %>% corrplot(type = 'lower')
+
+names(traindata[, best_pred])
 
 
 
 
+
+
+
+
+################################################################################
+#########STOP HERE #############################################################
 #################################################################################
 ################################################################################
 

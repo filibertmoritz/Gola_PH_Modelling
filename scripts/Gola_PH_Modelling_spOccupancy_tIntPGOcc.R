@@ -244,7 +244,7 @@ locs_transects <- locs_transects %>% mutate(Year_Transect_num = as.numeric(scale
 periods <- 1:max(locs_transects$Period)
 visits <- 1:max(locs_transects$Cell_visit)
 cells <- sort(unique(locs_transects$CellID))
-obs.covs.selection <- c('Date_Transect', 'Transect_Length', 'Project_Transect_num', 'Season_Transect_fact', 'Season_Transect_num', 'Occu') 
+obs.covs.selection <- c('Date_Transect', 'Transect_Length', 'Project_Transect_num', 'Season_Transect_fact', 'Season_Transect_num','Year_Transect_num', 'Year_Transect_fact', 'Occu') 
 obs.covs.transects <- replicate(length(obs.covs.selection),
                           array(NA, dim = c(length(cells), max(locs_transects$Period), max(locs_transects$Cell_visit))), 
                           simplify = F)
@@ -343,7 +343,7 @@ deploy_cam_visit_occu <- deploy_cam_visit_occu %>% mutate(Year_Camera_num = as.n
 periods <- 1:max(deploy_cam_visit_occu$Period)
 visits <- 1:max(deploy_cam_visit_occu$Cell_visit)
 cells <- sort(unique(deploy_cam_visit_occu$CellID))
-obs.covs.selection <- c('Date_Camera', 'Trapping_Days', 'Project_Focus_num', 'Season_Camera_fact', 'Season_Camera_num', 'Occu')
+obs.covs.selection <- c('Date_Camera', 'Trapping_Days', 'Project_Focus_num', 'Season_Camera_fact', 'Season_Camera_num', 'Year_Camera_num', 'Year_Camera_fact', 'Occu')
 obs.covs.camera <- replicate(length(obs.covs.selection),
                           array(NA, dim = c(length(cells), max(periods), max(visits))), 
                           simplify = F)
@@ -371,7 +371,7 @@ for(obs.det in obs.covs.selection){
 
 det.covs <- list(Transect = obs.covs.transects[names(obs.covs.transects) != "Occu"], 
                  Camera = obs.covs.camera[names(obs.covs.camera) != "Occu"])
-det.covs
+
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ###### 5.2 Occ Covs ######
@@ -448,7 +448,7 @@ data.list <- list(occ.covs, det.covs,y,  sites,  seasons)
 names(data.list) <- c('occ.covs', 'det.covs', 'y', 'sites', 'seasons') # name data.list corresponding to the requirements if spOccupancy::intPGOcc
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-##### 6. Set parameters for integrated occupancy model using spOccupancy::intPGOcc ######
+##### 6. Set parameters and call integrated occupancy model using spOccupancy::tIntPGOcc ######
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 # set inits, alpha - det.covs, z for 
@@ -471,27 +471,153 @@ priors.list <- list(beta.normal = list(mean = 0, var = 2.72), # priors for beta,
                     rho.unif = NULL)
 
 
-# call simple global model 
+# call global model 
 
 names(occ.covs)
-names(det.covs$Camera)
+names(det.covs$Transect)
 
-m1 <- tIntPGOcc(occ.formula = ~JRC_ann_changes_Undisturbed_tropical_moist_forest_Dec2017 + Reserve_Type, 
-          det.formula = list(Transect = ~Transect_Length + Date_Transect + I(Date_Transect^2), 
-                             Camera = ~Trapping_Days + Date_Camera + I(Date_Camera^2) + (1| Season_Camera_num)), 
+m1 <- tIntPGOcc(occ.formula = ~ river_density_med_large + Distance_large_river + 
+                  mean_elev + JRC_transition_Degraded_forest_short_duration_disturbance_after_2014 + 
+                  JRC_transition_Undisturbed_tropical_moist_forest + EVI_2020 + Distance_settlement, 
+          det.formula = list(Transect = ~Transect_Length + Date_Transect + I(Date_Transect^2) + Project_Transect_num + (1| Season_Transect_num) + (1| Year_Transect_num), 
+                             Camera = ~Trapping_Days + Date_Camera + I(Date_Camera^2) + Project_Focus_num + (1| Season_Camera_num) + (1| Year_Camera_num)), 
           data = data.list, 
-          n.batch = 3, 
+          n.batch = 5, 
           batch.length = 1000,
           n.chains = 3)
 
+# call model summary 
 summary(m1)
+
+# Goodness-of-fit test, freeman-tukey and grouped by sites, described in https://doserlab.com/files/spoccupancy-web/articles/spacetimemodelshtml
 ppc_m1 <- ppcOcc(m1, fit.stat = 'freeman-tukey', group = 1) # group 1 - groups values by site, group 2 - groups values per replicate, there is also chi squared available
 summary(ppc_m1) # get bayes p-value
+
+# visualise Goodness-of-fit 
+
+# produce a model check plot, code taken from https://doserlab.com/files/spoccupancy-web/articles/modelfitting
+ppc_result <- data.frame(fit = numeric(),fit.rep = numeric(),season = character(),dataset = character(),color = character())
+for(d in 1:length(det.covs)){
+  for(s in 1:length(m1$seasons[[d]])){
+    ppc_frame <- data.frame(fit = ppc_m1$fit.y[[d]][,s], fit.rep = ppc_m1$fit.y.rep[[d]][,s], 
+                            season = s, dataset = names(det.covs)[d], color = 'lightskyblue1')
+    ppc_frame$color[ppc_frame$fit.rep > ppc_frame$fit] <- 'lightsalmon'
+    ppc_result <- rbind(pcc_result, ppc_frame)
+  }
+}
+
+# plot 
+ppc_result %>% mutate(season = if_else(season == 1, '2011-2017', '2017-2025')) %>% 
+  ggplot() +
+  geom_point(mapping = aes(x = fit, y = fit.rep, colour = color), size = 0.8) +
+  geom_abline(intercept = 0, slope = 1, color = "black", linewidth = 1.2) +
+  facet_grid(season~dataset) +
+  labs(x = 'True', y = 'Fit', title = 'True vs. Fitted Values for all Data Sources and Time Periods') +
+  theme_bw()
+
+
+# lets have a look if there are any very influential data points 
+# diff_fit <- ppc_m1$fit.y.rep.group.quants[[2]][3, ] - ppc_m1$fit.y.group.quants[[2]][3, ] # change list to 1 or 2, depending on transect or camera, respectively 
+# plot(diff_fit, pch = 19, xlab = 'Site ID', ylab = 'Replicate - True Discrepancy', main = 'Camera Data')
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##### 7. Visualise effect sizes ######
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# plot effect sizes using MCMCvis
+library(MCMCvis)
+#jpeg(filename = 'output/plots/Effect_sizes_occu.jpg', height = 800, width = 800)
+MCMCplot(m1$beta.samples, ref_ovl = TRUE, ci = c(50, 95),  main = "Occupancy Effect Sizes")
+#dev.off()
+
+#jpeg(filename = 'output/plots/Effect_sizes_det.jpg', height = 1200, width = 1000)
+MCMCplot(m1$alpha.samples, ref_ovl = TRUE, ci = c(50, 95),  main = "Detection Effect Sizes")
+#dev.off()
+
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##### 8. Plot marginal effects plots influence for Occupancy   ######
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# skipped by now
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##### 9. Predict Occupancy throughout study area  ######
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# get all occu predictors + intercept for prediction
+occ.preds <- c('(Intercept)', all.vars(m1$call$occ.formula))
+
+# prepare all occu covariates for prediction
+envCovs_pred <- envCovs_sf %>%
+  st_drop_geometry() %>%
+  select(occ.preds[occ.preds != "(Intercept)"]) %>%
+  mutate(across(everything(), ~ scale(.) %>% as.vector())) %>%  
+  mutate(`(Intercept)` = 1) # extrac column with 1's for Intercept 
+
+# Create 3D array
+X.0 <- array(NA, dim = c(nrow(envCovs_pred), length(m1$seasons[[1]]), length(occ.preds)))
+dimnames(X.0) <- list(CellID = as.character(1:nrow(envCovs_pred)), Period = paste0("Period_", 1:length(m1$seasons[[1]])), Occ.covs = occ.preds)
+
+# Fill array: constant values across time periods
+for (o in occ.preds) {
+  for (s in 1:length(m1$seasons[[1]])) {
+    X.0[, s, o] <- envCovs_pred[[o]]
+  }
+}
+
+# predict 
+t.cols <- 1:2 # this indicates for which time periods we are predicting
+pred_m1 <- predict(m1, type = 'occupancy', ignore.RE = F, X.0 = X.0, t.cols = t.cols) # check, if 4 for t.cols is correct!
+
+# prediction is a list with two components: psi.0.samples (the occurrence probability predictions) and z.0.samples (the latent occurrence predictions), each as 3D arrays with dimensions corresponding to MCMC sample, site, primary period
+str(pred_m1)
+
+plot_m1 <- data.frame(CellID = numeric(), pred_mean = numeric(), Period = numeric())
+for(p in 1:length(m1$seasons[[1]])){
+  prediction <- data.frame(CellID = 1:nrow(X.0), 
+                           pred_mean = apply(pred_m1$psi.0.samples[, , p], 2, mean), 
+                           Period = p)
+  plot_m1 <- bind_rows(plot_m1, prediction)
+}
+
+# create sf
+plot_m1_sf <- envCovs_sf %>% left_join(plot_m1, join_by(CellID))
+
+
+# fancier plot
+library(ggspatial)
+ggplot(data = plot_m1_sf) +
+  #annotation_map_tile(zoom = 10, type = 'cartolight') +
+  geom_sf(aes(fill = pred_mean), # color = NA, 
+          alpha = 1) +  # Use pred_mean for fill color
+  scale_fill_viridis_c(option = "plasma", name = "Mean Predicted Occupancy", limits = c(0,1), direction = -1) + # scale_fill_viridis_c(option = "magma"), or replace "magma" with "inferno", "plasma", "cividis", 
+  facet_grid(~Period) +
+  theme_bw() +
+  theme(legend.position = "right", 
+        panel.border = element_rect(color = "darkgrey", fill = NA, linewidth = 1), # add frame
+        axis.line = element_blank()) +
+  labs(title = "Predicted Pygmy Hippo Occupancy Probability", 
+       subtitle = "Based on an Integrated Occupancy Model fitted in spOccupancy", 
+       x = 'Longitude', y = 'Latutude')
+#ggsave(filename = 'output/plots/PH_hotspot_map_all_data.jpg', plot = hotspot_map, height = 6, width = 12)
+
+
+
+
+
+
+
+
+
+
+
 
 
 
 #################################################################################
-####### CONTINUE FROM HERE ######################################################
+####### STOPPED HERE  ######################################################
 #################################################################################
 
 

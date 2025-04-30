@@ -394,14 +394,35 @@ envCovs_all <- envCovs_all_unscaled %>%
   mutate(across(!c(CellID, Reserve_Type, Type), ~ scale(.) %>% as.vector()), 
          Reserve_Type=as.factor(Reserve_Type))
 
-# create occ.covs list 
-occ.covs <- as.list(envCovs_all)
+
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ###### 5.2.2 Season-Level/Yearly-Site Occ Covs ######
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-# skipped for now since its not needed yet
+periods <- 1:max(deploy_cam_visit_occu$Period)
+cells <- c(sites.transect, sites.camera)
+
+# names(envCovs_sf)[grep('JRC_ann_changes', names(envCovs_sf))] # this is if only the years that are mn
+year_preds <- names(envCovs_sf)[grep("JRC_ann_changes.*(2013|2021)", names(envCovs_sf))]
+year.site.covs <- unique(gsub('_Dec2013|_Dec2021','', year_preds)) # fill in the years data should be extracted for (which refer to the periods)
+year.site.covs.list <- list()
+
+
+for(y in year.site.covs){
+  m <- matrix(data = NA, nrow = length(cells), ncol = length(periods), dimnames = list(cells, paste0('Period_',periods))) 
+  for(p in periods){
+      m[,p] <- envCovs_all[[ year_preds[grep(y, year_preds)][p] ]]
+      }
+  year.site.covs.list[[y]] <- m
+}
+
+# manually add year as yearly-site covariate 
+year.site.covs.list[['Period']] <- matrix(data = rep(periods, each = length(cells)), nrow = length(cells), ncol = length(periods), dimnames = list(cells, paste0('Period_',periods)))
+
+# create occ.covs list which compromises all data 
+occ.covs <- c(as.list(envCovs_all), year.site.covs.list) # add all matrices from a list to the occ.covs list by using c()
+
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ###### 5.3 Presence-absence data as y ######
@@ -439,13 +460,14 @@ seasons <- list(Transect = sort(unique(locs_transects$Period)),
 # check data 
 sites
 seasons
-occ.covs
+occ.covs %>% str()
 y
 det.covs
 
 # create data list which holds all data needed to run the model
 data.list <- list(occ.covs, det.covs,y,  sites,  seasons)
 names(data.list) <- c('occ.covs', 'det.covs', 'y', 'sites', 'seasons') # name data.list corresponding to the requirements if spOccupancy::intPGOcc
+str(data.list)
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ##### 6. Set parameters and call integrated occupancy model using spOccupancy::tIntPGOcc ######
@@ -478,7 +500,7 @@ names(det.covs$Transect)
 
 m1 <- tIntPGOcc(occ.formula = ~ river_density_med_large + Distance_large_river + 
                   mean_elev + JRC_transition_Degraded_forest_short_duration_disturbance_after_2014 + 
-                  JRC_transition_Undisturbed_tropical_moist_forest + EVI_2020 + Distance_settlement, 
+                  JRC_ann_changes_Undisturbed_tropical_moist_forest + EVI_2020 + Distance_settlement + Period, 
           det.formula = list(Transect = ~Transect_Length + Date_Transect + I(Date_Transect^2) + Project_Transect_num + (1| Season_Transect_num) + (1| Year_Transect_num), 
                              Camera = ~Trapping_Days + Date_Camera + I(Date_Camera^2) + Project_Focus_num + (1| Season_Camera_num) + (1| Year_Camera_num)), 
           data = data.list, 
@@ -502,7 +524,7 @@ for(d in 1:length(det.covs)){
     ppc_frame <- data.frame(fit = ppc_m1$fit.y[[d]][,s], fit.rep = ppc_m1$fit.y.rep[[d]][,s], 
                             season = s, dataset = names(det.covs)[d], color = 'lightskyblue1')
     ppc_frame$color[ppc_frame$fit.rep > ppc_frame$fit] <- 'lightsalmon'
-    ppc_result <- rbind(pcc_result, ppc_frame)
+    ppc_result <- rbind(ppc_result, ppc_frame)
   }
 }
 
@@ -546,8 +568,14 @@ MCMCplot(m1$alpha.samples, ref_ovl = TRUE, ci = c(50, 95),  main = "Detection Ef
 ##### 9. Predict Occupancy throughout study area  ######
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-# get all occu predictors + intercept for prediction
-occ.preds <- c('(Intercept)', all.vars(m1$call$occ.formula))
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##### 9.1 Prepare data for prediction ######
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# prepare site covariates 
+
+# get all occu predictors + intercept for prediction which vary at site not year-site level
+occ.preds <- c('(Intercept)', all.vars(m1$call$occ.formula)[!all.vars(m1$call$occ.formula) %in% names(year.site.covs.list)])
 
 # prepare all occu covariates for prediction
 envCovs_pred <- envCovs_sf %>%
@@ -566,6 +594,24 @@ for (o in occ.preds) {
     X.0[, s, o] <- envCovs_pred[[o]]
   }
 }
+
+
+
+# prepare yearly site covariates 
+
+# these are all the variables at site year level
+all.vars(m1$call$occ.formula)[all.vars(m1$call$occ.formula) %in% names(year.site.covs.list) ]
+
+occ.preds.year <- array(data = c(as.numeric(scale(envCovs$JRC_ann_changes_Undisturbed_tropical_moist_forest_Dec2013)), 
+               as.numeric(scale(envCovs$JRC_ann_changes_Undisturbed_tropical_moist_forest_Dec2013)), 
+               rep(1, times = nrow(envCovs)), rep(2, times = nrow(envCovs))), 
+      dim = c(nrow(envCovs), 2, 2), 
+      dimnames = list(paste0(1:nrow(envCovs)), paste0("Period_", 1:length(m1$seasons[[1]])),c("JRC_ann_changes_Undisturbed_tropical_moist_forest", 'Period')))
+
+# bring all prepared occ.covs for prediction together into one array 
+library(abind) # this is a package which makes binding arrays much easier
+X.0 <- abind(X.0, occ.preds.year, along = 3) 
+
 
 # predict 
 t.cols <- 1:2 # this indicates for which time periods we are predicting
@@ -602,12 +648,6 @@ ggplot(data = plot_m1_sf) +
        subtitle = "Based on an Integrated Occupancy Model fitted in spOccupancy", 
        x = 'Longitude', y = 'Latutude')
 #ggsave(filename = 'output/plots/PH_hotspot_map_all_data.jpg', plot = hotspot_map, height = 6, width = 12)
-
-
-
-
-
-
 
 
 

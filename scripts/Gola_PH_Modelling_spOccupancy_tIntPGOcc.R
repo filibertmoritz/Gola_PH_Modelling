@@ -30,7 +30,7 @@ rename <- dplyr::rename
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 # presence and deploy/survey data 
-pres_opp <- fread(file = 'data/PH_prepared_pres_opp_data.csv', stringsAsFactors = T) %>% select(-V1)
+# pres_opp <- fread(file = 'data/PH_prepared_pres_opp_data.csv', stringsAsFactors = T) %>% select(-V1)
 pres_cam <- fread(file = 'data/PH_prepared_pres_cam_data.csv', stringsAsFactors = T) %>% select(-V1)
 pres_transects <- fread(file = 'data/PH_prepared_pres_transect_data.csv', stringsAsFactors = T) %>% select(-V1)
 deploy_cam <- fread(file = 'data/PH_prepared_deploy_cam_data.csv', stringsAsFactors = T) %>% select(-V1)
@@ -244,7 +244,7 @@ locs_transects <- locs_transects %>% mutate(Year_Transect_num = as.numeric(scale
 periods <- 1:max(locs_transects$Period)
 visits <- 1:max(locs_transects$Cell_visit)
 cells <- sort(unique(locs_transects$CellID))
-obs.covs.selection <- c('Date_Transect', 'Transect_Length', 'Project_Transect_num', 'Season_Transect_fact', 'Season_Transect_num','Year_Transect_num', 'Year_Transect_fact', 'Occu') 
+obs.covs.selection <- c('Date_Transect', 'Transect_Length', 'Project_Transect_num', 'Project_Transect_fact', 'Season_Transect_fact', 'Season_Transect_num','Year_Transect_num', 'Year_Transect_fact', 'Occu') 
 obs.covs.transects <- replicate(length(obs.covs.selection),
                           array(NA, dim = c(length(cells), max(locs_transects$Period), max(locs_transects$Cell_visit))), 
                           simplify = F)
@@ -317,13 +317,13 @@ for(obs.det in obs.covs.selection){
 # calculate covariates 
 deploy_cam_visit_occu <- deploy_cam_visit_occu %>% ungroup()%>% 
   mutate(Project_Camera = as.factor(Project), 
-         Project_lumped_Camera = as.factor(case_when(Project %in% c('BasalZoo_2024','Basel Zoo PygmyHippo 2018-2020') ~ 'BaselZoo', # fill a more meaningful categorisation in
-                                                     Project %in% c('REDD_SP1', 'REDD_SP2', 'REDD_SP3', 'REDD_SP4', 'Pygmy Hippo REDD CT 2019-2021','artp_p1', 'artp_p2', 'REDD_ARTP_PygmyHippo 2013-2014') ~ 'REDD_ARTP', 
-                                                     Project %in% c('Darwin19_22', 'Darwin_morroRiver', 'darwin_13_17') ~ 'Darwin', 
-                                                     Project %in% c('IWT_CF') ~ 'IWT')),
-         Project_Focus_fact = as.ordered(if_else(Project %in% c('BasalZoo_2024', 'Basel Zoo PygmyHippo 2018-2020', 
-                                                                'Darwin_morroRiver', 'IWT_CT', 'Pygmy Hippo REDD CT 2019-2021', 
-                                                                'REDD_ARTP_PygmyHippo 2013-2014'), 'Pygmy_hippo', 'Other')),
+         # Project_lumped_Camera = as.factor(case_when(Project %in% c('BasalZoo_2024','Basel Zoo PygmyHippo 2018-2020') ~ 'BaselZoo', # fill a more meaningful categorisation in
+         #                                             Project %in% c('REDD_SP1', 'REDD_SP2', 'REDD_SP3', 'REDD_SP4', 'Pygmy Hippo REDD CT 2019-2021','artp_p1', 'artp_p2', 'REDD_ARTP_PygmyHippo 2013-2014') ~ 'REDD_ARTP', 
+         #                                             Project %in% c('Darwin19_22', 'Darwin_morroRiver', 'darwin_13_17') ~ 'Darwin', 
+         #                                             Project %in% c('IWT_CF') ~ 'IWT')),
+         Project_Focus_fact = as.ordered(if_else(Project %in% c('Pygmy Hippo REDD CT 2019-2021', 'REDD_ARTP_PygmyHippo 2013-2014', 
+                                                                'Darwin_morroRiver', 'Basel Zoo PygmyHippo 2018-2020', 'BasalZoo_2024'), 
+                                                 'Pygmy_hippo', 'Other')),
          Project_Focus_num_unscaled = as.numeric(if_else(Project_Focus_fact == 'Pygmy_hippo', 1, 0)), # Pygmy hippo is coded as 1, other as 0
          Date_Camera_unscaled = yday(Visit_start), 
          Year_Camera_fact = as.factor(year(Visit_start)), # survey year coded as factor
@@ -343,7 +343,7 @@ deploy_cam_visit_occu <- deploy_cam_visit_occu %>% mutate(Year_Camera_num = as.n
 periods <- 1:max(deploy_cam_visit_occu$Period)
 visits <- 1:max(deploy_cam_visit_occu$Cell_visit)
 cells <- sort(unique(deploy_cam_visit_occu$CellID))
-obs.covs.selection <- c('Date_Camera', 'Trapping_Days', 'Project_Focus_num', 'Season_Camera_fact', 'Season_Camera_num', 'Year_Camera_num', 'Year_Camera_fact', 'Occu')
+obs.covs.selection <- c('Date_Camera', 'Trapping_Days', 'Project_Focus_fact', 'Project_Focus_num', 'Season_Camera_fact', 'Season_Camera_num', 'Year_Camera_num', 'Year_Camera_fact', 'Occu')
 obs.covs.camera <- replicate(length(obs.covs.selection),
                           array(NA, dim = c(length(cells), max(periods), max(visits))), 
                           simplify = F)
@@ -368,17 +368,33 @@ for(obs.det in obs.covs.selection){
 }
 
 
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+###### 5.1.3 Bring det.covs from both data sources together ######
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 
 det.covs <- list(Transect = obs.covs.transects[names(obs.covs.transects) != "Occu"], 
                  Camera = obs.covs.camera[names(obs.covs.camera) != "Occu"])
 
 
+
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-###### 5.2 Occ Covs ######
+###### 5.2 Presence-absence data as y ######
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# extract occupancy data from observation level lists and safe in new list
+y <- list(obs.covs.transects["Occu"]$Occu, obs.covs.camera["Occu"]$Occu)
+names(y) <- c('Transect', 'Camera')
+y
+
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+###### 5.3 Occ Covs ######
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-###### 5.2.1 Site-Level Occ Covs ######
+###### 5.3.1 Site-Level Occ Covs ######
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 # get sites (Cells) for each data source
@@ -397,41 +413,38 @@ envCovs_all <- envCovs_all_unscaled %>%
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-###### 5.2.2 Season-Level/Yearly-Site Occ Covs ######
+###### 5.3.2 Season-Level/Yearly-Site Occ Covs ######
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-periods <- 1:max(deploy_cam_visit_occu$Period)
-cells <- c(sites.transect, sites.camera)
+# keep season level covariates unscaled here and scale later on covariate level, not within each year of the covariate seperately
 
+# prepare loop
+periods <- 1:max(deploy_cam_visit_occu$Period) # number of periods 
+cells <- c(sites.transect, sites.camera) # site/cell indices 
 # names(envCovs_sf)[grep('JRC_ann_changes', names(envCovs_sf))] # this is if only the years that are mn
 year_preds <- names(envCovs_sf)[grep("JRC_ann_changes.*(2013|2021)", names(envCovs_sf))]
 year.site.covs <- unique(gsub('_Dec2013|_Dec2021','', year_preds)) # fill in the years data should be extracted for (which refer to the periods)
 year.site.covs.list <- list()
 
 
+# call loop
 for(y in year.site.covs){
   m <- matrix(data = NA, nrow = length(cells), ncol = length(periods), dimnames = list(cells, paste0('Period_',periods))) 
   for(p in periods){
-      m[,p] <- envCovs_all[[ year_preds[grep(y, year_preds)][p] ]]
-      }
+      m[,p] <- envCovs_all_unscaled[[ year_preds[grep(y, year_preds)][p] ]] # take the unscaled df with envCovs
+  }
+  m_scaled <- scale(as.vector(m)) # scale all variables 
+  m <- matrix(m_scaled, nrow = nrow(m), ncol = ncol(m), dimnames = dimnames(m))  
   year.site.covs.list[[y]] <- m
 }
 
-# manually add year as yearly-site covariate 
-year.site.covs.list[['Period']] <- matrix(data = rep(periods, each = length(cells)), nrow = length(cells), ncol = length(periods), dimnames = list(cells, paste0('Period_',periods)))
+# manually add year or year-period as yearly-site covariate - two versions, numeric and scaled and as factor
+year.site.covs.list[['Period_num']] <- matrix(data = as.numeric(scale(rep(periods, each = length(cells)))), nrow = length(cells), ncol = length(periods), dimnames = list(cells, paste0('Period_',periods)))
+year.site.covs.list[['Period_fact']] <- matrix(data = rep(c('2011-2017','2018-2025'), each = length(cells)), nrow = length(cells), ncol = length(periods), dimnames = list(cells, paste0('Period_',periods)))
+
 
 # create occ.covs list which compromises all data 
 occ.covs <- c(as.list(envCovs_all), year.site.covs.list) # add all matrices from a list to the occ.covs list by using c()
-
-
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-###### 5.3 Presence-absence data as y ######
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-# extract occupancy data from observation level lists and safe in new list
-y <- list(obs.covs.transects["Occu"]$Occu, obs.covs.camera["Occu"]$Occu)
-names(y) <- c('Transect', 'Camera')
-y
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -500,12 +513,12 @@ names(det.covs$Transect)
 
 m1 <- tIntPGOcc(occ.formula = ~ river_density_med_large + Distance_large_river + 
                   mean_elev + JRC_transition_Degraded_forest_short_duration_disturbance_after_2014 + 
-                  JRC_ann_changes_Undisturbed_tropical_moist_forest + EVI_2020 + Distance_settlement + Period, 
-          det.formula = list(Transect = ~Transect_Length + Date_Transect + I(Date_Transect^2) + Project_Transect_num + (1| Season_Transect_num) + (1| Year_Transect_num), 
-                             Camera = ~Trapping_Days + Date_Camera + I(Date_Camera^2) + Project_Focus_num + (1| Season_Camera_num) + (1| Year_Camera_num)), 
+                  JRC_ann_changes_Undisturbed_tropical_moist_forest  + Period_num, 
+          det.formula = list(Transect = ~Transect_Length + Date_Transect + I(Date_Transect^2) + Project_Transect_fact + (1| Season_Transect_num) + (1| Year_Transect_num), 
+                             Camera = ~Trapping_Days + Date_Camera + I(Date_Camera^2) + Project_Focus_fact + (1| Season_Camera_num) + (1| Year_Camera_num)), 
           data = data.list, 
           n.batch = 5, 
-          batch.length = 1000,
+          batch.length = 2000,
           n.chains = 3)
 
 # call model summary 
@@ -519,16 +532,16 @@ summary(ppc_m1) # get bayes p-value
 
 # produce a model check plot, code taken from https://doserlab.com/files/spoccupancy-web/articles/modelfitting
 ppc_result <- data.frame(fit = numeric(),fit.rep = numeric(),season = character(),dataset = character(),color = character())
-for(d in 1:length(det.covs)){
+for(d in 1:length(m1$det.formula)){
   for(s in 1:length(m1$seasons[[d]])){
     ppc_frame <- data.frame(fit = ppc_m1$fit.y[[d]][,s], fit.rep = ppc_m1$fit.y.rep[[d]][,s], 
-                            season = s, dataset = names(det.covs)[d], color = 'lightskyblue1')
+                            season = s, dataset = names(m1$det.formula)[d], color = 'lightskyblue1')
     ppc_frame$color[ppc_frame$fit.rep > ppc_frame$fit] <- 'lightsalmon'
     ppc_result <- rbind(ppc_result, ppc_frame)
   }
 }
 
-# plot 
+# plot true vs fitted values 
 ppc_result %>% mutate(season = if_else(season == 1, '2011-2017', '2017-2025')) %>% 
   ggplot() +
   geom_point(mapping = aes(x = fit, y = fit.rep, colour = color), size = 0.8) +
@@ -538,9 +551,22 @@ ppc_result %>% mutate(season = if_else(season == 1, '2011-2017', '2017-2025')) %
   theme_bw()
 
 
-# lets have a look if there are any very influential data points 
-# diff_fit <- ppc_m1$fit.y.rep.group.quants[[2]][3, ] - ppc_m1$fit.y.group.quants[[2]][3, ] # change list to 1 or 2, depending on transect or camera, respectively 
-# plot(diff_fit, pch = 19, xlab = 'Site ID', ylab = 'Replicate - True Discrepancy', main = 'Camera Data')
+# plot influential data points 
+fit_result <- data.frame(fit = numeric(), numeric(),season = character(),dataset = character())
+for(d in 1:length(m1$det.formula)){
+  for(s in 1:length(m1$seasons[[d]])){
+    fit_frame <- data.frame(fit = ppc_m1$fit.y.rep.group.quants[[d]][3,,][,s] - ppc_m1$fit.y.group.quants[[d]][3,,][,s], 
+                            season = s, dataset = names(m1$det.formula)[d], SiteID = sites[[d]])
+    fit_result <- rbind(fit_result, fit_frame)
+  }
+}
+
+fit_result %>% mutate(season = if_else(season == 1, '2011-2017', '2017-2025')) %>% 
+  ggplot() +
+  geom_point(mapping = aes(y = fit, x = SiteID)) +
+  facet_grid(season~dataset, scale = 'free') + 
+  labs(y = 'Fit', title = 'Replicate - True Discrepancy') + 
+  theme_bw()
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ##### 7. Visualise effect sizes ######
@@ -584,11 +610,11 @@ envCovs_pred <- envCovs_sf %>%
   mutate(across(everything(), ~ scale(.) %>% as.vector())) %>%  
   mutate(`(Intercept)` = 1) # extrac column with 1's for Intercept 
 
-# Create 3D array
+# create an array
 X.0 <- array(NA, dim = c(nrow(envCovs_pred), length(m1$seasons[[1]]), length(occ.preds)))
 dimnames(X.0) <- list(CellID = as.character(1:nrow(envCovs_pred)), Period = paste0("Period_", 1:length(m1$seasons[[1]])), Occ.covs = occ.preds)
 
-# Fill array: constant values across time periods
+# loop over all site level covariates
 for (o in occ.preds) {
   for (s in 1:length(m1$seasons[[1]])) {
     X.0[, s, o] <- envCovs_pred[[o]]
@@ -602,9 +628,9 @@ for (o in occ.preds) {
 # these are all the variables at site year level
 all.vars(m1$call$occ.formula)[all.vars(m1$call$occ.formula) %in% names(year.site.covs.list) ]
 
-occ.preds.year <- array(data = c(as.numeric(scale(envCovs$JRC_ann_changes_Undisturbed_tropical_moist_forest_Dec2013)), 
-               as.numeric(scale(envCovs$JRC_ann_changes_Undisturbed_tropical_moist_forest_Dec2013)), 
-               rep(1, times = nrow(envCovs)), rep(2, times = nrow(envCovs))), 
+occ.preds.year <- array(data = c(as.numeric(scale(c(envCovs$JRC_ann_changes_Undisturbed_tropical_moist_forest_Dec2013, envCovs$JRC_ann_changes_Undisturbed_tropical_moist_forest_Dec2013))), 
+                                 # as.factor(rep(c('2011-2017', '2018-2025'), each = nrow(envCovs))), 
+                                 as.numeric(scale(rep(c(1, 2), each = nrow(envCovs))))), 
       dim = c(nrow(envCovs), 2, 2), 
       dimnames = list(paste0(1:nrow(envCovs)), paste0("Period_", 1:length(m1$seasons[[1]])),c("JRC_ann_changes_Undisturbed_tropical_moist_forest", 'Period')))
 
@@ -612,19 +638,18 @@ occ.preds.year <- array(data = c(as.numeric(scale(envCovs$JRC_ann_changes_Undist
 library(abind) # this is a package which makes binding arrays much easier
 X.0 <- abind(X.0, occ.preds.year, along = 3) 
 
-
 # predict 
 t.cols <- 1:2 # this indicates for which time periods we are predicting
-pred_m1 <- predict(m1, type = 'occupancy', ignore.RE = F, X.0 = X.0, t.cols = t.cols) # check, if 4 for t.cols is correct!
+pred_m1 <- predict(m1, type = 'occupancy', ignore.RE = T, X.0 = X.0, t.cols = t.cols) # check, if 4 for t.cols is correct!
 
 # prediction is a list with two components: psi.0.samples (the occurrence probability predictions) and z.0.samples (the latent occurrence predictions), each as 3D arrays with dimensions corresponding to MCMC sample, site, primary period
 str(pred_m1)
 
-plot_m1 <- data.frame(CellID = numeric(), pred_mean = numeric(), Period = numeric())
+plot_m1 <- data.frame(CellID = numeric(), pred_mean = numeric(), Period = character())
 for(p in 1:length(m1$seasons[[1]])){
   prediction <- data.frame(CellID = 1:nrow(X.0), 
                            pred_mean = apply(pred_m1$psi.0.samples[, , p], 2, mean), 
-                           Period = p)
+                           Period = c('2011-2017', '2018-2021')[p])
   plot_m1 <- bind_rows(plot_m1, prediction)
 }
 
@@ -634,18 +659,19 @@ plot_m1_sf <- envCovs_sf %>% left_join(plot_m1, join_by(CellID))
 
 # fancier plot
 library(ggspatial)
-ggplot(data = plot_m1_sf) +
+plot_m1_sf %>% 
+  ggplot() +
   #annotation_map_tile(zoom = 10, type = 'cartolight') +
   geom_sf(aes(fill = pred_mean), # color = NA, 
           alpha = 1) +  # Use pred_mean for fill color
   scale_fill_viridis_c(option = "plasma", name = "Mean Predicted Occupancy", limits = c(0,1), direction = -1) + # scale_fill_viridis_c(option = "magma"), or replace "magma" with "inferno", "plasma", "cividis", 
   facet_grid(~Period) +
   theme_bw() +
-  theme(legend.position = "right", 
+  theme(legend.position = "bottom", 
         panel.border = element_rect(color = "darkgrey", fill = NA, linewidth = 1), # add frame
         axis.line = element_blank()) +
   labs(title = "Predicted Pygmy Hippo Occupancy Probability", 
-       subtitle = "Based on an Integrated Occupancy Model fitted in spOccupancy", 
+       subtitle = "Based on an Static Multi Year Integrated Occupancy Model fitted in spOccupancy", 
        x = 'Longitude', y = 'Latutude')
 #ggsave(filename = 'output/plots/PH_hotspot_map_all_data.jpg', plot = hotspot_map, height = 6, width = 12)
 

@@ -585,17 +585,11 @@ MCMCplot(m1$alpha.samples, ref_ovl = TRUE, ci = c(50, 95),  main = "Detection Ef
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-##### 8. Plot marginal effects plots influence for Occupancy   ######
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-# skipped by now
-
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-##### 9. Predict Occupancy throughout study area  ######
+##### 8. Predict Occupancy throughout study area  ######
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-##### 9.1 Prepare data for prediction ######
+##### 8.1 Prepare data for prediction ######
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 # prepare site covariates 
@@ -632,7 +626,7 @@ occ.preds.year <- array(data = c(as.numeric(scale(c(envCovs$JRC_ann_changes_Undi
                                  # as.factor(rep(c('2011-2017', '2018-2025'), each = nrow(envCovs))), 
                                  as.numeric(scale(rep(c(1, 2), each = nrow(envCovs))))), 
       dim = c(nrow(envCovs), 2, 2), 
-      dimnames = list(paste0(1:nrow(envCovs)), paste0("Period_", 1:length(m1$seasons[[1]])),c("JRC_ann_changes_Undisturbed_tropical_moist_forest", 'Period')))
+      dimnames = list(paste0(1:nrow(envCovs)), paste0("Period_", 1:length(m1$seasons[[1]])),c("JRC_ann_changes_Undisturbed_tropical_moist_forest", 'Period_num')))
 
 # bring all prepared occ.covs for prediction together into one array 
 library(abind) # this is a package which makes binding arrays much easier
@@ -677,183 +671,64 @@ plot_m1_sf %>%
 
 
 
-
-
-
-
-
-#################################################################################
-####### STOPPED HERE  ######################################################
-#################################################################################
-
-
-
-
-
-
-# different models: 
-## year as.numeric and as.factor in both det in random effect 
-## camera project lumped in det formula, camera project non lumped with all levels as random effects additional to year
-## add reserve type into occ model 
-## year is not doable in occ model 
-## in det try both Date and Date^2
-## add nested random effect for Season and year as factor in det models 
-
-names(occ.covs) # variables for occ submodel
-names(det.covs.transect) # variables for det transect submodel
-names(det.covs.camera) # variables for det camera submodel 
-
-
-gc()
-m1 <- intPGOcc(occ.formula = ~  river_density_med_large + Distance_large_river + mean_elev + JRC_transition_Degraded_forest_short_duration_disturbance_after_2014 + JRC_transition_Undisturbed_tropical_moist_forest + EVI_2020 + Distance_settlement, #occ.cov, 
-               det.formula = list(transect = ~ Date_Transect + I(Date_Transect^2)  + Transect_Length + Season_Transect + Project_Transect_fact + (1 | Year_Transect_num), 
-                                  camera = ~ Date_Camera + I(Date_Camera^2) + Trapping_Days + Season_Camera + Project_Camera + (1 | Year_Camera_num)), 
-               data = data.list, inits = inits.list, n.samples = n.samples, priors = priors.list, 
-               n.omp.threads = 5, # use 5 cores
-               verbose = TRUE, # means that messages about processing and computation are printed to console
-               n.report = 2500, n.burn = 10000, 
-               n.thin = 1, n.chains = 3)
-
-#m2 <- intPGOcc(occ.formula = ~ river_density_med_large + Distance_large_river + mean_elev + JRC_transition_Degraded_forest_short_duration_disturbance_after_2014 + JRC_transition_Undisturbed_tropical_moist_forest , #occ.cov, 
-#               det.formula = list(transect = ~ Date_Transect + I(Date_Transect^2)  + Transect_Length + Project_Transect + Season_Transect + (1 | Year_Transect), 
-#                                  camera = ~ Date_Camera + I(Date_Camera^2) + Trapping_Days + Season_Camera + (1 | Year_Camera)), 
-#               data = data.list,
-#               inits = inits.list,
-#               n.samples = n.samples, 
-#               priors = priors.list, 
-#               n.omp.threads = 5, # use 5 cores
-#               verbose = TRUE, # means that messages about processing and computation are printed to console
-#               n.report = 2500, 
-#               n.burn = 10000, 
-#               n.thin = 1, # no thinning
-#               n.chains = 3)
-
-
-# access model 
-summary(m1) # Rhat looks pretty good, ESS always (mostly far) above 1000
-# plot(m1, param = 'alpha')
-
-
-# produce posterior predictive checks, here using chi-square and freeman tukey - the results aren't very similar
-gc()
-ppc_m1 <- ppcOcc(m1, fit.stat = 'freeman-tukey', group = 1) # group 1 - groups values by site, group 2 - groups values per replicate, there is also chi squared available
-summary(ppc_m1) # get bayes p-value
-
-
-# produce a model check plot, code taken from https://doserlab.com/files/spoccupancy-web/articles/modelfitting
-ppc_m1_df <- data.frame(fit = ppc_m1$fit.y[[2]], 
-                            fit.rep = ppc_m1$fit.y.rep[[2]], 
-                            color = 'lightskyblue1')
-ppc_m1_df$color[ppc_m1_df$fit.rep > ppc_m1_df$fit] <- 'lightsalmon'
-plot(ppc_m1_df$fit, ppc_m1_df$fit.rep, bg = ppc_m1_df$color, pch = 21, 
-     ylab = 'Fit', xlab = 'True', main = 'Camera Data bay p-val 0.2071')
-lines(ppc_m1_df$fit, ppc_m1_df$fit, col = 'black')
-
-# lets have a look if there are any very influential data points 
-diff_fit <- ppc_m1$fit.y.rep.group.quants[[2]][3, ] - ppc_m1$fit.y.group.quants[[2]][3, ] # change list to 1 or 2, depending on transect or camera, respectively 
-plot(diff_fit, pch = 19, xlab = 'Site ID', ylab = 'Replicate - True Discrepancy', main = 'Camera Data')
-
-
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-##### 7. Visualise effect sizes ######
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##### 9. Plot marginal effects plots for Occupancy   ######
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
 
-# plot effect sizes using MCMCvis
-library(MCMCvis)
-#jpeg(filename = 'output/plots/Effect_sizes_occu.jpg', height = 800, width = 800)
-MCMCplot(m1$beta.samples, ref_ovl = TRUE, ci = c(50, 95),  main = "Occupancy Effect Sizes")
-#dev.off()
+# Attention! The covariates for prediction in the X.0 array should be organized in the same order as they were specified in the corresponding formula argument of tIntPGOcc.
 
-#jpeg(filename = 'output/plots/Effect_sizes_det.jpg', height = 1200, width = 1000)
-MCMCplot(m1$alpha.samples, ref_ovl = TRUE, ci = c(50, 95),  main = "Detection Effect Sizes")
-#dev.off()
+# get all occu predictors + intercept for prediction which vary at site not year-site level
+occ.preds <- c('(Intercept)', all.vars(m1$call$occ.formula))
+n <- 500 # number of predictions per variable 
+head(X.0) # this is the old array for prediction in gola 
+X.0.mrgnl.effects <- array(data = NA, dim = c(n, length(m1$seasons[[1]]), length(occ.preds)))
+dimnames(X.0.mrgnl.effects) <- list(NULL, Period = paste0("Period_", 1:length(m1$seasons[[1]])), Occ.covs = occ.preds)
 
+head(X.0.mrgnl.effects)
+head(X.0)
 
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-##### 8. Plot marginal effects plots influence for Occupancy   ######
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-# predict for each variable while holding the other variables constant (here mean of scaled numeric variables, which would be 0)
-n <- 1000 # length of df determines how many predictions should be made, influence on computation time 
-const_val <- data.frame(`(Intercept)` = rep(1, n),
-                       river_density_med_large = rep(mean(occ.covs$river_density_med_large), length.out = n), 
-                       Distance_large_river = rep(mean(occ.covs$Distance_large_river), length.out = n), 
-                       mean_elev = rep(mean(occ.covs$mean_elev), length.out = n), 
-                       JRC_transition_Degraded_forest_short_duration_disturbance_after_2014 = rep(mean(occ.covs$JRC_transition_Degraded_forest_short_duration_disturbance_after_2014), length.out = n), 
-                       JRC_transition_Undisturbed_tropical_moist_forest = rep(mean(occ.covs$JRC_transition_Undisturbed_tropical_moist_forest), length.out = n), 
-                       EVI_2020 = rep(mean(occ.covs$EVI_2020), length.out = n), 
-                       Distance_settlement = rep(mean(occ.covs$Distance_settlement), length.out = n))
-effect_occu_all <- data.frame() # initialise df
-occ.var <- colnames(m1$X)[2:dim(m1$X)[2]] # get all variables used in occu fomula, except of intercept
-for(var in occ.var){
-  X.0 <- const_val %>% # create matrix to hand over to predict function
-    mutate(!!var := seq(min(occ.covs[,var]), max(occ.covs[,var]), length.out = n),
-           unscaled = seq(min(occ.covs.unscaled[,var]), max(occ.covs.unscaled[,var]), length.out = n)) %>% 
-    as.matrix()
-  
-  pred_occu_effect <- predict(m1, type = 'occupancy', ignore.RE = T, X.0 = X.0[,!grepl('unscaled', colnames(X.0))]) # predict with matrix
-  pred_occu_effect <- apply(pred_occu_effect$psi.0.samples, 2, quantile, c(0.025, 0.5, 0.975))   # summarise prediction 
-  
-  occu_effect <- as.data.frame(t(pred_occu_effect)) %>%   # wrangle data together 
-    rename(pred_mean = `50%`, pred_CI_lower = `2.5%`, pred_CI_upper = `97.5%`) 
-  occu_effect <- bind_cols(occu_effect,  unscaled = X.0[,'unscaled']) %>% 
-    mutate(Variable = var)
-  
-  effect_occu_all <- bind_rows(effect_occu_all, occu_effect)   # save in massive df
+# use old array to built a new one with constant values 
+for(o in occ.preds){
+  for (s in 1:length(m1$seasons[[1]])){
+      X.0.mrgnl.effects[,s,o] <- rep(mean(X.0[,s, o], na.rm = T), times = n) # this adds constant values for all predictors
+  }
 }
 
-# produce quick plot
-ggplot(effect_occu_all) +
-  geom_ribbon(aes(x = unscaled, ymin = pred_CI_lower, ymax = pred_CI_upper), fill = "skyblue", alpha = 0.5) +
-  geom_line(aes(x = unscaled, y = pred_mean), color = "blue", size = 1) +
-  facet_wrap(~Variable, scale = 'free_x')+
-  ggtitle("Effect of Model Variables on Predicted Occupancy") +
-  xlab("Variable") + 
-  ylab("Predicted Occupancy") +
+# check that everything went okay 
+head(X.0.mrgnl.effects) # somehow its a bit weird, yearly site covariates seem to be constant across the periods - doublecheck this 
+t.cols <- 1:2 # this indicates for which time periods we are predicting
+plot.mrgnl.effects <- data.frame(variable = character(), value = numeric(), pred.mean = numeric(), Period = character(), pred.upper = numeric(), pred.lower = numeric()) 
+
+# actual prediction 
+for(o in occ.preds){
+  varying.array <- array(data = NA, dim = c(n, length(m1$seasons[[1]])))
+  dimnames(varying.array) <- list(NULL, paste0("Period_", 1:length(m1$seasons[[1]])))
+  for(s in  1:length(m1$seasons[[1]])){
+    varying.array[,s] <- seq(from = min(X.0[,s,o], na.rm = T), to = max(X.0[,s,o], na.rm = T), length.out = n)
+  }
+  pred.array <- X.0.mrgnl.effects
+  pred.array[,,o] <- varying.array
+  pred.mrgnl.effects <- predict(m1, t.cols = t.cols, X.0 = pred.array, type = 'occupancy', ignore.RE = F)
+  
+  for(p in 1:length(m1$seasons[[1]])){
+    prediction.mrgnl.effects <- data.frame(variable = o, 
+                             value = pred.array[,p,o], 
+                             pred.mean = apply(pred.mrgnl.effects$psi.0.samples[, ,p], 2, mean), 
+                             pred.lower = apply(pred.mrgnl.effects$psi.0.samples[, ,p], 2, quantile, probs = 0.025),
+                             pred.upper = apply(pred.mrgnl.effects$psi.0.samples[, ,p], 2, quantile, probs = 0.975),
+                             Period = c('2011-2017', '2018-2021')[p])
+    plot.mrgnl.effects <- bind_rows(plot.mrgnl.effects, prediction.mrgnl.effects)
+  }
+  # plot.mrgnl.effects <- bind_rows(plot.mrgnl.effects, prediction.mrgnl.effects)
+}
+
+
+# produce a plot 
+plot.mrgnl.effects %>% filter(!variable %in% c('(Intercept)', 'Period_num')) %>% 
+  ggplot() +
+  geom_ribbon(aes(x = value, ymin = pred.lower, ymax = pred.upper, fill = Period), alpha = 0.3, linewidth = 1.2)+
+  geom_line(mapping = aes(x = value, y = pred.mean, color = Period)) +
+  facet_wrap(~variable, scale = 'free_x') + 
   theme_bw()
 
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-##### 9. Predict Pygmy hippo Occurence in Gola ######
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-# create model matrix
-X.0 <- model.matrix(~ river_density_med_large + Distance_large_river + 
-                      mean_elev + JRC_transition_Degraded_forest_short_duration_disturbance_after_2014 + 
-                      JRC_transition_Undisturbed_tropical_moist_forest + EVI_2020 + Distance_settlement, 
-                    data = envCovs_sf %>% select(-Reserve_Type) %>% st_drop_geometry() %>% mutate(across(everything(),~ scale(.) %>% as.vector())))
-
-# predict 
-pred_m1 <- predict(m1, type = 'occupancy', ignore.RE = T, X.0 = X.0)
-
-# summarise prediction 
-psi.hat.quants <- apply(pred_m1$psi.0.samples, 2, quantile, c(0.025, 0.5, 0.975))
-
-# create a df for plotting 
-plot_m1 <- as.data.frame(t(psi.hat.quants)) %>% 
-  mutate(CellID = row_number()) %>% 
-  rename(pred_mean = `50%`, pred_CI_lower = `2.5%`, pred_CI_upper = `97.5%`)
-
-# create sf
-plot_m1_sf <- envCovs_sf %>% left_join(plot_m1, join_by(CellID))
-
-# plot prediction on map
-tm_shape(plot_m1_sf) +
-  tm_polygons(fill = 'pred_mean')
-
-
-# fancier plot
-library(ggspatial)
-ggplot(data = plot_m1_sf) +
-  #annotation_map_tile(zoom = 10, type = 'cartolight') +
-  geom_sf(aes(fill = pred_mean), # color = NA, 
-          alpha = 1) +  # Use pred_mean for fill color
-  scale_fill_viridis_c(option = "plasma", name = "Mean Predicted Occupancy", limits = c(0,1), direction = -1) + # scale_fill_viridis_c(option = "magma"), or replace "magma" with "inferno", "plasma", "cividis", 
-  theme_bw() +
-  theme(legend.position = "right", 
-        panel.border = element_rect(color = "darkgrey", fill = NA, linewidth = 1), # add frame
-        axis.line = element_blank()) +
-  labs(title = "Predicted Pygmy Hippo Occupancy Probability", 
-       subtitle = "Based on an Integrated Occupancy Model fitted in spOccupancy", 
-       x = 'Longitude', y = 'Latutude')
-#ggsave(filename = 'output/plots/PH_hotspot_map_all_data.jpg', plot = hotspot_map, height = 6, width = 12)
 

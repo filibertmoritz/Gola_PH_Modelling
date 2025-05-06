@@ -335,7 +335,22 @@ for(i in 1:length(deploy_pres_plot)){
 ##### 8. create a plot that shows distribution of camera trapping days ####
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-days <- deploy_cam %>% rowwise() %>% mutate(Date = list(seq(Deployment, Collection, by = "1 days"))) %>%  # split in 20 days intervals, however, there are mostly days remaining as tail
+months <- deploy_cam %>% rowwise() %>% mutate(Date = list(seq(Deployment, Collection, by = "1 days"))) %>%  # split in 1 days intervals, however, there are mostly days remaining as tail
+  unnest(Date) %>% 
+  mutate(month = lubridate::month(Date, label = T)) %>% 
+  ggplot() +
+  geom_histogram(mapping = aes(x = month), binwidth = 1, stat = 'count') + 
+  theme_bw() +
+  labs(title = "Monthly Camera Trapping Effort in Gola", x = "Month", y = "Total Number of Camera Trapping Days across all Years")
+  
+season <- deploy_cam %>% rowwise() %>% mutate(Date = list(seq(Deployment, Collection, by = "1 days"))) %>%  # split in 1 days intervals, however, there are mostly days remaining as tail
+  unnest(Date) %>% 
+  mutate(Season = as.factor(if_else(month(Date) %in% 5:10, 'Wet Season (May-Oct)', 'Dry Season (Nov-Apr)'))) %>%
+  ggplot() +
+  geom_histogram(mapping = aes(x = Season),  stat = 'count') +
+  theme_bw() +
+  labs(title = "Seasonal Camera Trapping Effort in Gola",  y = "Total Number of Camera Trapping Days across all Years")
+days <- deploy_cam %>% rowwise() %>% mutate(Date = list(seq(Deployment, Collection, by = "1 days"))) %>%  # split in 1 days intervals, however, there are mostly days remaining as tail
   unnest(Date) %>% 
   ggplot() +
   geom_histogram(mapping = aes( x = Date), binwidth = 1) + 
@@ -351,9 +366,14 @@ pres_filt <- pres_cam %>% mutate(Date = as.Date(Obs_DateTime)) %>% group_by(Proj
   geom_histogram(mapping = aes(x = Obs_DateTime))+
   theme_bw()  +
   labs(title = "Number of Presences Across Time", subtitle = "Only one presence per camera site and date allowed", x = "Time", y = "Number of Presences")
+pres_filt_month <- pres_cam %>% mutate(Date = as.Date(Obs_DateTime)) %>% group_by(Project, SiteID, Date) %>% slice(1) %>% 
+  ggplot() +
+  geom_histogram(mapping = aes(x = lubridate::month(Obs_DateTime, label = T)), stat = 'count')+
+  theme_bw()  +
+  labs(title = "Number of Presences by Month", subtitle = "Only one presence per camera site and date allowed", x = "Months", y = "Number of Presences")
 
 library(ggpubr)
-overview_cam <- ggarrange(days, pres_all, pres_filt, ncol = 2, nrow = 2, common.legend = F)
-ggsave(filename = 'C:/Users/filib/Documents/Praktika/RSPB/Gola_PH_Modelling/output/plots/Data_overview_cameras.jpg', plot = overview_cam, width = 8, height = 6)
+overview_cam <- ggarrange(season, months, days, pres_all, pres_filt,pres_filt_month, ncol = 2, nrow = 3, common.legend = F)
+ggsave(filename = 'C:/Users/filib/Documents/Praktika/RSPB/Gola_PH_Modelling/output/plots/Data_overview_cameras.jpg', plot = overview_cam, width = 11, height = 12)
 
 

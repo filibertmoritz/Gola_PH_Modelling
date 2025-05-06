@@ -511,18 +511,31 @@ priors.list <- list(beta.normal = list(mean = 0, var = 2.72), # priors for beta,
 names(occ.covs)
 names(det.covs$Transect)
 
-m1 <- tIntPGOcc(occ.formula = ~ river_density_med_large + Distance_large_river + 
-                  mean_elev + JRC_transition_Degraded_forest_short_duration_disturbance_after_2014 + 
-                  JRC_ann_changes_Undisturbed_tropical_moist_forest  + Period_num, 
+m1 <- tIntPGOcc(occ.formula = ~ river_density_med_large + Distance_large_river + mean_elev  
+                + JRC_ann_changes_Undisturbed_tropical_moist_forest 
+                + Period_num , 
           det.formula = list(Transect = ~Transect_Length + Date_Transect + I(Date_Transect^2) + Project_Transect_fact + (1| Season_Transect_num) + (1| Year_Transect_num), 
                              Camera = ~Trapping_Days + Date_Camera + I(Date_Camera^2) + Project_Focus_fact + (1| Season_Camera_num) + (1| Year_Camera_num)), 
-          data = data.list, 
-          n.batch = 5, 
-          batch.length = 2000,
-          n.chains = 3)
+          data = data.list,
+          batch.length = 2500,
+          n.batch = 5,
+          n.report = 10,
+          n.chains = 4)
+
+m2 <- tIntPGOcc(occ.formula = ~ river_density_med_large + Distance_large_river + mean_elev  
+                + JRC_ann_changes_Undisturbed_tropical_moist_forest + Reserve_Type 
+                + Period_num , 
+                det.formula = list(Transect = ~Transect_Length + Date_Transect + I(Date_Transect^2) + Project_Transect_fact + (1| Season_Transect_num) + (1| Year_Transect_num), 
+                                   Camera = ~Trapping_Days + Date_Camera + I(Date_Camera^2) + Project_Focus_fact + (1| Season_Camera_num) + (1| Year_Camera_num)), 
+                data = data.list,
+                batch.length = 2500,
+                n.batch = 5,
+                n.report = 10,
+                n.chains = 4)
 
 # call model summary 
 summary(m1)
+summary(m2)
 
 # Goodness-of-fit test, freeman-tukey and grouped by sites, described in https://doserlab.com/files/spoccupancy-web/articles/spacetimemodelshtml
 ppc_m1 <- ppcOcc(m1, fit.stat = 'freeman-tukey', group = 1) # group 1 - groups values by site, group 2 - groups values per replicate, there is also chi squared available
@@ -542,7 +555,7 @@ for(d in 1:length(m1$det.formula)){
 }
 
 # plot true vs fitted values 
-ppc_result %>% mutate(season = if_else(season == 1, '2011-2017', '2017-2025')) %>% 
+ppc_result %>% mutate(season = if_else(season == 1, '2011-2017', '2018-2025')) %>% 
   ggplot() +
   geom_point(mapping = aes(x = fit, y = fit.rep, colour = color), size = 0.8) +
   geom_abline(intercept = 0, slope = 1, color = "black", linewidth = 1.2) +
@@ -575,8 +588,8 @@ fit_result %>% mutate(season = if_else(season == 1, '2011-2017', '2017-2025')) %
 # plot effect sizes using MCMCvis
 library(MCMCvis)
 #jpeg(filename = 'output/plots/Effect_sizes_occu.jpg', height = 800, width = 800)
-MCMCplot(m1$beta.samples, ref_ovl = TRUE, ci = c(50, 95),  main = "Occupancy Effect Sizes")
-#dev.off()
+MCMCplot(m2$beta.samples, ref_ovl = TRUE, ci = c(50, 95),  main = "Occupancy Effect Sizes")
+A#dev.off()
 
 #jpeg(filename = 'output/plots/Effect_sizes_det.jpg', height = 1200, width = 1000)
 MCMCplot(m1$alpha.samples, ref_ovl = TRUE, ci = c(50, 95),  main = "Detection Effect Sizes")
@@ -622,7 +635,8 @@ for (o in occ.preds) {
 # these are all the variables at site year level
 all.vars(m1$call$occ.formula)[all.vars(m1$call$occ.formula) %in% names(year.site.covs.list) ]
 
-occ.preds.year <- array(data = c(as.numeric(scale(c(envCovs$JRC_ann_changes_Undisturbed_tropical_moist_forest_Dec2013, envCovs$JRC_ann_changes_Undisturbed_tropical_moist_forest_Dec2013))), 
+occ.preds.year <- array(data = c(as.numeric(scale(c(envCovs$JRC_ann_changes_Undisturbed_tropical_moist_forest_Dec2013, envCovs$JRC_ann_changes_Undisturbed_tropical_moist_forest_Dec2021))), 
+                                 #as.numeric(scale(c(envCovs$JRC_ann_changes_Tropical_moist_forest_regrowth_Dec2021, envCovs$JRC_ann_changes_Tropical_moist_forest_regrowth_Dec2021))),
                                  # as.factor(rep(c('2011-2017', '2018-2025'), each = nrow(envCovs))), 
                                  as.numeric(scale(rep(c(1, 2), each = nrow(envCovs))))), 
       dim = c(nrow(envCovs), 2, 2), 
@@ -634,7 +648,7 @@ X.0 <- abind(X.0, occ.preds.year, along = 3)
 
 # predict 
 t.cols <- 1:2 # this indicates for which time periods we are predicting
-pred_m1 <- predict(m1, type = 'occupancy', ignore.RE = T, X.0 = X.0, t.cols = t.cols) # check, if 4 for t.cols is correct!
+pred_m1 <- predict(m1, type = 'occupancy', ignore.RE = F, X.0 = X.0, t.cols = t.cols) # check, if 4 for t.cols is correct!
 
 # prediction is a list with two components: psi.0.samples (the occurrence probability predictions) and z.0.samples (the latent occurrence predictions), each as 3D arrays with dimensions corresponding to MCMC sample, site, primary period
 str(pred_m1)
@@ -643,7 +657,7 @@ plot_m1 <- data.frame(CellID = numeric(), pred_mean = numeric(), Period = charac
 for(p in 1:length(m1$seasons[[1]])){
   prediction <- data.frame(CellID = 1:nrow(X.0), 
                            pred_mean = apply(pred_m1$psi.0.samples[, , p], 2, mean), 
-                           Period = c('2011-2017', '2018-2021')[p])
+                           Period = c('2011-2017', '2018-2025')[p])
   plot_m1 <- bind_rows(plot_m1, prediction)
 }
 
@@ -716,7 +730,7 @@ for(o in occ.preds){
                              pred.mean = apply(pred.mrgnl.effects$psi.0.samples[, ,p], 2, mean), 
                              pred.lower = apply(pred.mrgnl.effects$psi.0.samples[, ,p], 2, quantile, probs = 0.025),
                              pred.upper = apply(pred.mrgnl.effects$psi.0.samples[, ,p], 2, quantile, probs = 0.975),
-                             Period = c('2011-2017', '2018-2021')[p])
+                             Period = c('2011-2017', '2018-2025')[p])
     plot.mrgnl.effects <- bind_rows(plot.mrgnl.effects, prediction.mrgnl.effects)
   }
   # plot.mrgnl.effects <- bind_rows(plot.mrgnl.effects, prediction.mrgnl.effects)
@@ -729,6 +743,7 @@ plot.mrgnl.effects %>% filter(!variable %in% c('(Intercept)', 'Period_num')) %>%
   geom_ribbon(aes(x = value, ymin = pred.lower, ymax = pred.upper, fill = Period), alpha = 0.3, linewidth = 1.2)+
   geom_line(mapping = aes(x = value, y = pred.mean, color = Period)) +
   facet_wrap(~variable, scale = 'free_x') + 
-  theme_bw()
+  theme_bw() +
+  labs(x = 'Scaled values of environmental covariates', y = 'Predicted Occupancy', title = 'Effect of Environmental Covariates on Occupancy')
 
 

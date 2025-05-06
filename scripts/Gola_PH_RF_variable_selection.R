@@ -181,7 +181,7 @@ occu_sf[is.na(occu_sf)] <- 0 # this replaces all NAs - places where no species w
 str(envCovs_sf)
 pred <- envCovs_sf %>% 
   st_drop_geometry() %>% 
-  select(-CellID, -area, -NDVI_2013, -EVI_2013, -matches("2021|2013"))  # remove unneeded variables and non-numeric variables 
+  select(-CellID, -area, -NDVI_2013, -EVI_2013, -matches("2021|2013"), -matches('JRC_transition_'))  # remove unneeded variables and non-numeric variables 
 colnames(pred) <- str_remove_all(colnames(pred), 'JRC_ann_changes_')
 colnames(pred) <- str_remove_all(colnames(pred), 'JRC_transition_')
 
@@ -250,7 +250,8 @@ traindata <- traindata %>%
 
 # get all predictors from data set
 pred <- traindata %>% 
-  select(-CellID, -area, -NDVI_2013, -EVI_2013, -matches("2021|2013|Effort"), -Occu) %>% # remove a few predictors which aren't needed
+  select(-CellID, -area, -NDVI_2013, -EVI_2013, -Distance_thoroughfares, -Distance_road, -Distance_settlement,
+         -matches("2021|2013|Effort"),-matches('JRC_transition_') , -Occu) %>% # remove a few predictors which aren't needed
   colnames()
 
 # built formulas
@@ -393,7 +394,7 @@ ggplot(results_vip) +
 # select 10 best predictors from all models 
 best_pred <- results_vip %>% group_by(model, variable) %>% 
   summarise(mean_importance = mean(importance)) %>%
-  slice_max(order_by = mean_importance, n = 6) %>% pull(variable) %>% unique()
+  slice_max(order_by = mean_importance, n = 5) %>% pull(variable) %>% unique()
 best_pred <- best_pred[best_pred != 'Effort'] # exclude effort
 # best_pred <- best_pred[best_pred != 'Reserve_Type'] # exclude Reserve_Type which is categorial
 

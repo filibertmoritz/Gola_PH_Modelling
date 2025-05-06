@@ -202,14 +202,55 @@ pres_filt <- pres_transects %>%
   theme_bw()  +
   labs(title = "Number of Presences Across Time", subtitle = "Only one presence per transect and date allowed", x = "Time", y = "Number of Presences")
 
+pres_filt_month <- pres_transects %>% 
+  mutate(Date = as.Date(Obs_DateTime), 
+         Month = lubridate::month(Date, label = T)) %>% 
+  group_by(TransectIDName, Date) %>% 
+  slice(1) %>% 
+  ggplot() +
+  geom_histogram(mapping = aes(x = Month), stat = 'count') +
+  theme_bw()  +
+  labs(title = "Monthly Number of Presences", subtitle = "Only one presence per transect and date allowed", x = "Month", y = "Number of Presences across all Years")
+
+pres_filt_season <- pres_transects %>% 
+  mutate(Date = as.Date(Obs_DateTime), 
+         Season = as.factor(if_else(month(Obs_DateTime) %in% 5:10, 'Wet Season (May-Oct)', 'Dry Season (Nov-Apr)'))) %>% 
+  group_by(TransectIDName, Date) %>% 
+  slice(1) %>% 
+  ggplot() +
+  geom_histogram(mapping = aes(x = Season), stat = 'count') +
+  theme_bw()  +
+  labs(title = "Seasonal Number of Presences Across Time", subtitle = "Only one presence per transect and date allowed", x = "Season", y = "Number of Presences across all Years")
+
 survey <- locs_transects %>%
   ggplot() +
   geom_histogram(mapping = aes(x = DateTime_Start))  +
   theme_bw() +
   labs(title = "Number of Transect Surveys Across Time",x = "Time", y = "Number of Surveys")
 
+survey_month <- locs_transects %>%
+  mutate(length =   as.numeric(units::set_units(st_length(geometry), "km")), month = lubridate::month(DateTime_Start, label = T)) %>% 
+  group_by(month) %>% 
+  summarise(length_month = sum(length)) %>% drop_na() %>%
+  ggplot() +
+  geom_bar(mapping = aes(y = length_month, x = month), stat = 'identity')  +
+  theme_bw() +
+  labs(title = "Monthly Transect Survey Effort",x = "Month", y = "Sum of km Transects across all Years")
+
+survey_season <- locs_transects %>%
+  mutate(length =   as.numeric(units::set_units(st_length(geometry), "km")), 
+         Season = as.factor(if_else(month(DateTime_Start) %in% 5:10, 'Wet Season (May-Oct)', 'Dry Season (Nov-Apr)'))) %>% 
+  group_by(Season) %>% 
+  summarise(length_season = sum(length)) %>% drop_na() %>%
+  ggplot() +
+  geom_bar(mapping = aes(y = length_season, x = Season), stat = 'identity')  +
+  theme_bw() +
+  labs(title = "Seasonal Transect Survey Effort",x = "Season", y = "Sum of km Transects across all Years")
+
+
+
 # create arranged plot and save
 library(ggpubr)
-overview <- ggarrange(pres_all, pres_filt, survey, ncol = 2, nrow = 2, common.legend = F)
-ggsave(filename = 'C:/Users/filib/Documents/Praktika/RSPB/Gola_PH_Modelling/output/plots/Data_overview_transects.jpg', plot = overview, width = 8, height = 6)
+overview <- ggarrange(pres_all, pres_filt, pres_filt_month, pres_filt_season, survey, survey_month, survey_season, ncol = 2, nrow = 4, common.legend = F)
+ggsave(filename = 'C:/Users/filib/Documents/Praktika/RSPB/Gola_PH_Modelling/output/plots/Data_overview_transects.jpg', plot = overview, width = 10, height = 12)
 

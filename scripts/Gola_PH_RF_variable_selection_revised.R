@@ -241,6 +241,7 @@ for(f in formulas){
   i <- i+1 # count 1 further
 }
 
+
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ##### 8. Calculate AUC Variable Importance for each RF #####
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -261,7 +262,7 @@ results_vip <- data.frame(model = factor(), iter = numeric(), variable = charact
 
 for(m_names in names(models)){
   m <- models[[m_names]]
-  for(n in 1:3){ # this could also be done in nperm within varImpAUC, however it may not be 
+  for(n in 1:10){ # this could also be done in nperm within varImpAUC, however it may not be 
     if(grepl("as\\.factor", as.character(m@data@formula$response[2]))){
       v <- moreparty::fastvarImpAUC(m, conditional = 0, parallel = T)} # v <- party::varimpAUC(m, conditional = T) # alternatively moreparty::varImpAUC(m, conditional = 0, parallel = T) or varImp::varImpAUC
     else{
@@ -274,64 +275,49 @@ for(m_names in names(models)){
 # calculate mean AUC varImp per model and variable
 results_vip <- results_vip %>% 
   group_by(model, variable) %>% 
-  mutate(mean_importance = mean(importance))
+  mutate(mean_importance = mean(importance)) %>% 
+  group_by(model) %>% 
+  mutate(variation = abs(min(importance)), 
+         # rel_mean_importance = rescale(mean_importance, c(0,1))
+         )
 
-# make plot out of curiosity
 
-# only the means 
-ggplot(results_vip, aes(x = reorder(variable, mean_importance), y = mean_importance)) +
-  geom_col(fill = "steelblue") +
-  coord_flip() +
-  facet_wrap(~ model, scales = "free") +
-  labs(
-    x = "Variable",
-    y = "Mean AUC-based Importance",
-    title = "Variable Importance by Model") +
-  theme_minimal(base_size = 13)
-
-# means and single varImps together
-ggplot(results_vip) +
-  # Grey jittered points: individual importance scores
-  geom_point(aes(x = reorder(variable, mean_importance), y = importance),
-             color = "grey20", alpha = 0.5, size = 1.5,
+# plot variable importance and save
+plot <- results_vip %>% 
+  mutate(Model = case_when(model == 'crf_without_effort'~ 'a) Model without consideration of effort.', 
+                           model == 'crf_occu_effort_response' ~ 'b) Model with occupancy-effort ratio as response variable.', 
+                           model == 'crf_effort_pred' ~ 'c) Model with effort as predictor variable.'), 
+         Variable = case_when(variable == 'Distance_large_river' ~ 'Distance to large river', 
+                              variable == 'mean_elev' ~ 'Elevation', 
+                              variable == 'river_density_med_large'~ 'Density of medium and large rivers', 
+                              variable == 'Distance_road'~ 'Distance to roads', 
+                              variable == 'Reserve_Type'~ 'Reserve Type', 
+                              .default = variable))  %>% 
+  ggplot() +
+  geom_point(aes(x = reorder(Variable, mean_importance), y = importance, color = "Individual replicates"), alpha = 0.5, size = 1.5,
              position = position_jitter(width = 0.2)) +
-  # Red vertical lines from 0 to mean importance
-  geom_segment(aes(x = reorder(variable, mean_importance), xend = reorder(variable, mean_importance),
-                   y = 0, yend = mean_importance),
-               color = "red", linewidth = 1) +
-  # Red mean points
-  geom_point(aes(x = reorder(variable, mean_importance), y = mean_importance),
-             color = "red", size = 1.5) +
+  geom_segment(aes(x = reorder(Variable, mean_importance), xend = reorder(Variable, mean_importance),
+                   y = 0, yend = mean_importance, color = "Mean importance"), linewidth = .9) +
+  geom_point(aes(x = reorder(Variable, mean_importance), y = mean_importance, color = "Mean importance"), size = 1.8) +
+  geom_hline(aes(yintercept = variation, color = "Random variation"), linetype = 2) +
   coord_flip() +
-  facet_wrap(~ model, scales = "free") +
+  facet_grid(. ~ Model, scales = "free", switch = "y") + 
+  scale_color_manual(name = "Legend",
+                     values = c("Mean importance" = "firebrick", 
+                                "Mean importance" = "firebrick", 
+                                "Individual replicates" = "gray30",
+                                "Random variation" = "grey50")) +
   labs(x = "Variable",
-    y = "AUC-based Importance",
-    title = "Variable Importance per Model",
-    subtitle = "Grey dots: individual runs (n = 10); Red line + dot: mean importance") +
-  theme_minimal(base_size = 13)
-
-ggplot(results_vip) +
-  geom_point(aes(x = reorder(variable, mean_importance), y = importance),
-             color = "grey20", alpha = 0.5, size = 1.5,
-             position = position_jitter(width = 0.2)) +
-  geom_segment(aes(x = reorder(variable, mean_importance), xend = reorder(variable, mean_importance),
-                   y = 0, yend = mean_importance),
-               color = "red", linewidth = 1) +
-  geom_point(aes(x = reorder(variable, mean_importance), y = mean_importance),
-             color = "red", size = 1.5) +
-  coord_flip() +
-  facet_grid(. ~ model, scales = "free", switch = "y") +  # key change
-  labs(x = "Variable",
-       y = "AUC-based Importance",
-       title = "Variable Importance per Model",
-       subtitle = "Grey dots: individual runs (n = 10); Red line + dot: mean importance") +
-  theme_minimal(base_size = 13) +
-  theme(strip.placement = "outside")
-
+       y = "Relative Variable Importance",
+       title = "Variable Importance") +
+  theme_bw(base_size = 13) +
+  theme(legend.background = element_rect(color = "black"), 
+        legend.position = c(0.9, 0.15))
+ggsave(plot = plot, filename = 'output/plots/PH_crf_variable_selection.jpg', width = 15, height = 8)
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-##### 9. Select all 10 best variables per RF #####
+##### 9. Select all 5 best variables per RF #####
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 # select 10 best predictors from all models 
@@ -339,11 +325,14 @@ best_pred <- results_vip %>% group_by(model, variable) %>%
   summarise(mean_importance = mean(importance)) %>%
   slice_max(order_by = mean_importance, n = 5) %>% pull(variable) %>% unique()
 best_pred <- best_pred[best_pred != 'Effort'] # exclude effort
-# best_pred <- best_pred[best_pred != 'Reserve_Type'] # exclude Reserve_Type which is categorial
+best_pred
+
+
 
 # check for correlation between best predictors
+library(corrplot)
 
-traindata[, best_pred] %>% st_drop_geometry() %>% cor() %>% corrplot(type = 'lower')
+traindata[, best_pred] %>% st_drop_geometry()  %>% select(-Reserve_Type) %>% cor() %>% corrplot(type = 'lower')
 
-names(traindata[, best_pred])
+
 

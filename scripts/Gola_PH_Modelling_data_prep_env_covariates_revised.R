@@ -28,7 +28,7 @@ rename <- dplyr::rename
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-##### 2. Read in data and tidy everything up ####
+##### 2. Read in data and tidy everything up #### 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 # set path
@@ -36,21 +36,29 @@ path <- 'C:/Users/filib/Documents/Praktika/RSPB/data/spatialdata/raster data'
 
 # raster data - capital letters
 DTM <- rast(x = paste0(path, '/Gola90mDTM.tif'))
-VEG_2013_aug <- rast(x = paste0(path, '/MOD13Q1.A2013225.h16v08.061.2021237170725.hdf')) # from 13.08.2013 0:00 to 28.08.2013 23:59
-VEG_2013_feb <- rast(x = paste0(path, '/MOD13Q1.A2013033.h16v08.061.2021226153239.hdf')) # from 02.02.2013 0:00 to 17.02.2013 23:59
-VEG_2021_feb <- rast(x = paste0(path, '/MOD13Q1.A2021033.h16v08.061.2021049223006.hdf')) # from 02.02.2021 0:00 to 17.02.2021 23:59
-VEG_2021_aug <- rast(x = paste0(path, '/MOD13Q1.A2021225.h16v08.061.2021243200737.hdf')) # from 13.08.2021 0:00 to 28.08.2021 23:59
+SLOPE <- rast(x = paste0(path, '/ASTER30SLOPE.tif'))
+VEG_aug_2013 <- rast(x = paste0(path, '/MOD13Q1.A2013225.h16v08.061.2021237170725.hdf')) # from 13.08.2013 0:00 to 28.08.2013 23:59
+VEG_feb_2013 <- rast(x = paste0(path, '/MOD13Q1.A2013033.h16v08.061.2021226153239.hdf')) # from 02.02.2013 0:00 to 17.02.2013 23:59
+VEG_aug_2017 <- rast(x = paste0(path, '/MOD13Q1.A2017225.h16v08.061.2021280152407.hdf')) # from 13.08.2017 0:00 to 28.08.2017 23:59
+VEG_feb_2017 <- rast(x = paste0(path, '/MOD13Q1.A2017033.h16v08.061.2021266145520.hdf')) # from 02.02.2017 0:00 to 17.08.2017 23:59
+VEG_feb_2021 <- rast(x = paste0(path, '/MOD13Q1.A2021033.h16v08.061.2021049223006.hdf')) # from 02.02.2021 0:00 to 17.02.2021 23:59
+VEG_aug_2021 <- rast(x = paste0(path, '/MOD13Q1.A2021225.h16v08.061.2021243200737.hdf')) # from 13.08.2021 0:00 to 28.08.2021 23:59
 JRC_ANN_CHANGE <- terra::rast(x = paste0(path, '/JRC_TMF_AnnualChanges2021_GGL.tif'))
+JRC_TRANSITION <- terra::rast(raster::raster(x = paste0(path, '/JRC_TMF_Transition2021_GGL.tif'))) 
+# JRC_DEGRAD <- terra::rast(raster::raster(x = paste0(path, '/JRC_TMF_DegradationYear2021_GGL.tif'))) # more information on the JRC data at https://forobs.jrc.ec.europa.eu/TMF/resources/tutorial/gee
+
 
 # immediately throw away the stuff which isn't needed
 JRC_ANN_CHANGE_2013 <- JRC_ANN_CHANGE[[c('Dec2013')]] # here select the year that is needed, but then also change it in the if else statement, I think data is only available until Dez2021
 JRC_ANN_CHANGE_2021 <- JRC_ANN_CHANGE[[c('Dec2021')]] # here select the year that is needed, but then also change it in the if else statement, I think data is only available until Dez2021
 JRC_ANN_CHANGE_2017 <- JRC_ANN_CHANGE[[c('Dec2017')]] # as intermediate year 
 rm(JRC_ANN_CHANGE)
-VEG_2013_aug <-  VEG_2013_aug[[c('"250m 16 days NDVI"', '"250m 16 days EVI"')]]
-VEG_2013_feb <-  VEG_2013_feb[[c('"250m 16 days NDVI"', '"250m 16 days EVI"')]]
-VEG_2021_aug <-  VEG_2021_aug[[c('"250m 16 days NDVI"', '"250m 16 days EVI"')]]
-VEG_2021_feb <-  VEG_2021_feb[[c('"250m 16 days NDVI"', '"250m 16 days EVI"')]]
+VEG_aug_2013 <-  VEG_aug_2013[[c('"250m 16 days NDVI"', '"250m 16 days EVI"')]]
+VEG_feb_2013 <-  VEG_feb_2013[[c('"250m 16 days NDVI"', '"250m 16 days EVI"')]]
+VEG_aug_2017 <-  VEG_aug_2017[[c('"250m 16 days NDVI"', '"250m 16 days EVI"')]]
+VEG_feb_2017 <-  VEG_feb_2017[[c('"250m 16 days NDVI"', '"250m 16 days EVI"')]]
+VEG_aug_2021 <-  VEG_aug_2021[[c('"250m 16 days NDVI"', '"250m 16 days EVI"')]]
+VEG_feb_2021 <-  VEG_feb_2021[[c('"250m 16 days NDVI"', '"250m 16 days EVI"')]]
 
 # vector data 
 rivers <- st_read('C:/Users/filib/Documents/Praktika/RSPB/data/spatialdata/Gola_rivers.shp')
@@ -104,7 +112,7 @@ for(i in 1:length(spat_vectors)){ # loop over all spatVectors and project to new
 ##### 4. Create a grid and buffered study area##########
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-# create grid, for 2km2 choose 1519 as cellsize
+# create grid, for ~2km2 choose 1519 as cellsize
 grid_sf <- st_make_grid(study_area, cellsize = 1519.671, square = F) %>% # creates a st object, for squares: square = T, F is polygons - here make sure that we create the appropriate grid cell size!
   st_as_sf() %>% # store as sf object 
   st_filter(study_area, .predicate = st_intersects) %>% # filter all polygons that lie within or touch the study area
@@ -148,9 +156,9 @@ for(veg in veg_layers){
 }
 
 
-# extract elevation data from DTM
+# extract elevation data from DTM and slope from SLOPE
 elev_mean <- exactextractr::exact_extract(DTM, grid_sf, fun = 'weighted_mean', weights = 'area')
-
+slope_mean <- exactextractr::exact_extract(SLOPE, grid_sf, fun = 'weighted_mean', weights = 'area')
 
 # extract data from JRC annual changes layers
 # more information on JRC data here: https://forobs.jrc.ec.europa.eu/static/tmf/TMF_DataUsersGuide.pdf
@@ -178,16 +186,55 @@ for(ann in ann_changes){
   assign(paste0('JRC_ann_changes_', year, '_stats'), extracted, envir = .GlobalEnv) # save extracted data back to global environment 
 }
 
+
+# get data from JRC Transition
+JRC_TRANSITION <- as.factor(JRC_TRANSITION) # improve data structure of JRC_TRANSITION
+class_names <- data.frame(Value = levels(JRC_TRANSITION)[[1]]$ID, 
+                          label = c('Undisturbed_tropical_moist_forest', ## class 10
+                                    'Degraded_forest_short_duration_disturbance_before_2014', # class 21
+                                    'Degraded_forest_short_duration_disturbance_after_2014', # class 22
+                                    'Degraded_forest_long_duration_disturbance_before_2014', # class 23
+                                    'Degraded_forest_long_duration_disturbance_after_2014', # class 24
+                                    'Degraded_forest_2_3_degradation_periods_before_2014', # class 25
+                                    'Degraded_forest_2_3_degradation_periods_after_2014', # class 26
+                                    'Regrowth_desturbed_before_2004', # class 31
+                                    'Regrowth_desturbed_between_2004_2013', # class 32
+                                    'Regrowth_desturbed_between_2014_2020', # class 33
+                                    'Deforestation_started_before_2013', # class 41
+                                    'Deforestation_started_between_2013_2020', # class 42
+                                    'Deforestation_started_2021', 'Deforestation_started_2022', 'Deforestation_started_2023', 'Degradation_started_2023', # class 51 to 54  
+                                    'Permanent_water','Seasonal_water', 'Deforestation_to_permanent_water', 'Deforestation_to_seasonal_water', # class 71 to 74
+                                    'Old_plantation', 'Plantation_regrowing_disturbed_before_2014', 'Plantation_regrowing_disturbed_between_2014_2020', 'Conversion_to_plantation_before_2014', 'Conversion_to_plantation_between_2015_2021', 'Recent_conversion_to_plantation_started_2021',
+                                    'Other_lc_without_afforestation','Afforestation_young', 'Afforestation_old', 'Water_recently_converted_into_forest_regrowth')) 
+levels(JRC_TRANSITION) <- class_names
+
+# extract data from JRC transition map -sub types
+JRC_transition_stats <- exactextractr::exact_extract(JRC_TRANSITION, grid_sf, fun = 'weighted_frac', weights = 'area', append_cols = 'CellID')
+names(JRC_transition_stats) <- c('CellID', paste0('JRC_transition_', class_names$label)) # set appropriate class names, taken from here: https://forobs.jrc.ec.europa.eu/static/tmf/TMF_DataUsersGuide.pdf#[{%22num%22%3A16%2C%22gen%22%3A0}%2C{%22name%22%3A%22XYZ%22}%2C69%2C736%2C0]
+
+# select only those variables which might be of interest
+JRC_transition_stats <- JRC_transition_stats %>% select(CellID, JRC_transition_Undisturbed_tropical_moist_forest, JRC_transition_Degraded_forest_short_duration_disturbance_before_2014, 
+                                                        JRC_transition_Degraded_forest_short_duration_disturbance_after_2014, JRC_transition_Degraded_forest_long_duration_disturbance_before_2014, 
+                                                        JRC_transition_Degraded_forest_long_duration_disturbance_after_2014, JRC_transition_Degraded_forest_2_3_degradation_periods_before_2014, 
+                                                        JRC_transition_Degraded_forest_2_3_degradation_periods_after_2014, JRC_transition_Regrowth_desturbed_between_2004_2013, JRC_transition_Regrowth_desturbed_between_2014_2020)
+
+
+
+
 # join all data to grid_sf
 grid_sf <- grid_sf %>% 
-  left_join(VEG_2013_aug_extracted, join_by(CellID)) %>% 
-  left_join(VEG_2013_feb_extracted, join_by(CellID)) %>% 
-  left_join(VEG_2021_aug_extracted, join_by(CellID)) %>% 
-  left_join(VEG_2021_feb_extracted, join_by(CellID)) %>% 
+  left_join(VEG_feb_2013_extracted, join_by(CellID)) %>% 
+  left_join(VEG_aug_2013_extracted, join_by(CellID)) %>% 
+  left_join(VEG_feb_2017_extracted, join_by(CellID)) %>% 
+  left_join(VEG_aug_2017_extracted, join_by(CellID)) %>% 
+  left_join(VEG_feb_2021_extracted, join_by(CellID)) %>% 
+  left_join(VEG_aug_2021_extracted, join_by(CellID)) %>%
   left_join(JRC_ann_changes_2013_stats, join_by(CellID)) %>% 
   left_join(JRC_ann_changes_2017_stats, join_by(CellID)) %>% 
   left_join(JRC_ann_changes_2021_stats, join_by(CellID)) %>% 
-  mutate(mean_elev = elev_mean)
+  left_join(JRC_transition_stats, join_by(CellID)) %>% 
+  mutate(mean_elev = elev_mean, 
+         mean_slope = slope_mean)
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

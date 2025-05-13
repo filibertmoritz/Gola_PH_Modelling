@@ -18,7 +18,7 @@
 ####              3: Degenhardt et al. 2019 - https://academic.oup.com/bib/article/20/2/492/4554516?login=false, variable selection in omics using rf, not super relevant
 ####              4: Gregorutti et al. 2016 - https://link.springer.com/article/10.1007/s11222-016-9646-1, correlation and variable selection in rf
 ####              5: Hanberry 2024 - https://www.sciencedirect.com/science/article/pii/S1574954123004351, about correlation in SDMs and variable importance 
-
+####              6: Buston and Elith 2011 - https://onlinelibrary.wiley.com/doi/10.1111/j.1365-2656.2011.01803.x
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ##### 1. Preparatations #####
@@ -30,14 +30,15 @@ library(tidyverse)
 library(lubridate)
 library(hms)
 library(data.table)
-library(ranger)
+# library(ranger)
 library(party)
 library(varImp) # probably only one of these is needed!
 library(moreparty) # not sure if needed!
-library(permimp)
+# library(permimp)
 library(scales)
 library(tmap)
 library(stringr)
+library(units)
 
 select <- dplyr::select
 rename <- dplyr::rename
@@ -82,9 +83,21 @@ pres_cam <- pres_cam %>% mutate(Obs_Method = 'Camera Trap') %>%
 
 # merge data together and save as sf
 pres_sf <- bind_rows(pres_cam, 
-                     # pres_opp,
                      pres_transects) %>% 
+  mutate(Period = as.factor(if_else(year(Obs_DateTime) <= 2017, '2011-2017', '2018-2025'))) %>%  # create column with time 2 distinct time periods 
   st_as_sf(coords = c('UTM_X_meters', 'UTM_Y_meters'), remove = F, crs = 32629)
+
+
+## this checks out what steffen suggested 
+#ntree <- 1500
+#weightsmatrix <- matrix(NA, nrow = dim(pres_sf)[1], ncol = ntree) # this creates a matrix with ntree columns and number of sites for rows - for every tree there is a column with all sites 
+
+## fill in the different periods (2011-2017 is 0 and 2018-2025 is 1)
+#names <- levels(pres_sf$Period) # use period as grouping factor 
+#treeseq <- rep(1:5, 300)
+#for(i in 1:ntree){
+#  weightsmatrix[,i] <- if_else(pres_sf$Period == names)
+#}
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -93,10 +106,11 @@ pres_sf <- bind_rows(pres_cam,
 
 # effort variable for camera trap data 
 deploy_cam_sf <- deploy_cam_sf %>% 
-  mutate(Deployment_Time = as.numeric(difftime(Collection, Deployment, units = 'days'))) # calculate deployment time in days
+  mutate(Deployment_Time = as.numeric(difftime(Collection, Deployment, units = 'days')), # calculate deployment time in days
+         Period = as.factor(if_else(year(Collection) <= 2017, '2011-2017', '2018-2025'))) 
 
-effort_cam <- deploy_cam_sf %>% # sum up deployment time and number of cameras per cell
-  st_join(grid_sf) %>% group_by(CellID) %>% 
+effort_cam <- deploy_cam_sf %>% # sum up deployment time and number of cameras per cell per period
+  st_join(grid_sf) %>% group_by(CellID, Period) %>% 
   summarise(CameraEffort_Time = sum(Deployment_Time), 
             CameraEffort_N = n(), 
             .groups = 'keep') %>% 
@@ -104,32 +118,66 @@ effort_cam <- deploy_cam_sf %>% # sum up deployment time and number of cameras p
 
 # effort variable for transect data 
 effort_transects <- locs_transects %>% 
+  mutate(Period = as.factor(if_else(year(DateTime_End) <= 2017, '2011-2017', '2018-2025'))) %>%
   st_intersection(grid_sf) %>%  # drops all the cells where no trancests are
-  mutate(TransectEffort_Length = st_length(geometry, which = 'Euclidean')) %>%  # compute length of each river segment per grid cell, in m (which is the unit of the projected CRS)
-  group_by(CellID) %>%  # group by grid cell
+  mutate(TransectEffort_Length = set_units(st_length(geometry, which = 'Euclidean'), 'm')) %>%  # compute length of each river segment per grid cell, in m (which is the unit of the projected CRS)
+  group_by(CellID, Period) %>%  # group by grid cell
   summarise(TransectEffort_Length = as.numeric(sum(TransectEffort_Length, na.rm = TRUE)))%>%
   st_drop_geometry()
 
-# bring effort data together
+# bring effort data together, beforehand create a template grid with a CellID for each Time period
 effort_sf <- grid_sf %>% 
-  left_join(effort_cam, join_by(CellID)) %>% 
-  left_join(effort_transects, join_by(CellID))
+  mutate(Period = as.factor('2011-2017')) %>% rbind(grid_sf %>% mutate(Period = as.factor('2018-2025'))) %>%
+  left_join(effort_cam, join_by(CellID, Period)) %>% 
+  left_join(effort_transects, join_by(CellID, Period))
 effort_sf[is.na(effort_sf)] <- 0 # replace all NAs with 0 
 
-# calculate one effort index with rescaled variables to between 0 and 1
-effort_sf <- effort_sf %>%
- mutate(CameraEffort = (rescale(as.numeric(CameraEffort_Time), to = c(0,1)) + 
-                          rescale(as.numeric(CameraEffort_N), to = c(0,1)) / 2), # one Camera Trap effort variable as mean from both N and Time
-         TransectEffort = rescale(as.numeric(TransectEffort_Length), to = c(0,1)), # rescaled Transect length per cell
-         Effort = (CameraEffort + (TransectEffort))/2) # mean of both efforts
+# summarise data to calculate ratio between transect and camera effort effectiveness to presences // THIS WORKS WITH RAW DATA which is not filtered by independence!
+effort_comparison <- effort_sf %>% 
+  st_drop_geometry() %>%
+  group_by(Period) %>% 
+  summarise(overall_transect_effort = sum(TransectEffort_Length), # in m 
+            overall_camera_time_effort = sum(CameraEffort_Time), # in days
+            overall_camera_N_effort = sum(CameraEffort_N)) %>% 
+  mutate(pres_trans = c(nrow(pres_transects %>% filter(year(Obs_DateTime)<= 2017)), # this calculates the number of transect presences in the first time period 
+                        nrow(pres_transects %>% filter(year(Obs_DateTime)> 2017))), # this calculates the number of transect presences in the second time period 
+         pres_cam = c(nrow(pres_cam %>% filter(year(Obs_DateTime)<= 2017)), # this calculates the number of camera presences in the first time period 
+                      nrow(pres_cam %>% filter(year(Obs_DateTime)> 2017)))) # this calculates the number of camera presences in the second time period 
+
+ratio <- effort_comparison %>% mutate(ratio_transects = pres_trans/overall_transect_effort, # per m surveyed transect we have these many PH signs 
+                 ratio_camera_time = pres_cam/overall_camera_time_effort, # per day camera deployment we have these many PH sightings 
+                 ratio_camera_N = pres_cam/overall_camera_N_effort) # per camera we have these many PH sightings
+
+################################################################################
+##### FILL SOMETHING APPROPRIATE IN ############################################
+#################################################################################
+
+# calculate factor to inflate the camera effort to the scale of meters for each time period 
+inflation <- ratio %>% mutate(cam_time_inflation = ratio_camera_time/ratio_transects) %>% pull(cam_time_inflation)
+# these factors mean, that one had to survey this many meters to equal out one camera trapping day
+
+# calculate effort across survey methods 
+effort_sf <- effort_sf %>% 
+  mutate(CameraEffort_Time_inflated = if_else(Period == '2011-2017', CameraEffort_Time*inflation[1], CameraEffort_Time*inflation[2]), 
+         Effort_unscaled = CameraEffort_Time_inflated+TransectEffort_Length, 
+         Effort_scaled = rescale(Effort_unscaled, to = c(0,1))) # this scales across periods, not within periods!
+  
+
+
+## calculate one effort index with rescaled variables to between 0 and 1
+# effort_sf <- effort_sf %>%
+#  mutate(CameraEffort = (rescale(as.numeric(CameraEffort_Time), to = c(0,1)) + 
+#                           rescale(as.numeric(CameraEffort_N), to = c(0,1)) / 2), # one Camera Trap effort variable as mean from both N and Time
+#          TransectEffort = rescale(as.numeric(TransectEffort_Length), to = c(0,1)), # rescaled Transect length per cell
+#          Effort = (CameraEffort + (TransectEffort))/2) # mean of both efforts
 
 # remove unneeded effort objects 
-rm(effort_cam, effort_transects)
+rm(effort_cam, effort_transects, ratio, inflation)
 
 # overview effort plot 
 tmap_mode("view")  # interactive mode
-tm_shape(effort_sf) + 
-  tm_polygons(fill = "Effort", lwd = .2, 
+tm_shape(effort_sf %>% filter(Period == '2018-2025')) + 
+  tm_polygons(fill = "Effort_scaled", lwd = .2, 
               fill.scale = tm_scale_continuous(values = "viridis", midpoint = 0)) +
 tm_shape(locs_transects) + 
   tm_lines(col = 'red', lwd = 1.5) +
@@ -139,12 +187,35 @@ tm_shape(pres_sf) +
   tm_symbols(fill = 'brown', shape = 3)
 
 
-effort_sf %>% filter(Effort > 0) %>% nrow() # there are 311 cells where surveys were performed
+effort_sf %>% filter(Effort_scaled > 0) %>% nrow() # there are 420 cells where surveys were performed in both periods
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-##### 5. Create presence-absence information per grid cell #####
+##### 5. Create presence-absence information per grid cell and period #####
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#################################################################################
+###### SOMEHOWE THIS DOES NOT REALLY WORk #######################################
+##################################################################################
+
+# even if there is no effort in this time period, the loop fills in a 1 for a presence if there is another presence in the other period
+
+occu_list <- list()
+for(p in unique(pres_sf$Period)){
+  occu_list[[p]] <- pres_sf %>% filter(Period == p) %>%
+    select(geometry) %>%
+    st_join(effort_sf) %>%  # effort data transferred as well to possibly infer on 0's if there was effort, but no presence in a grid cell (only relevant if pres_opp is included too)
+    st_drop_geometry() %>% 
+    group_by(CellID) %>% 
+    mutate(Occu = if_else(n() > 0, 1, 0)) %>% # this transferres all count data into presence-absence data 
+    distinct()
+}
+
+occu <- bind_rows(occu_list)
+
+################################################################################
+##### unTIL HERE ################################
+################################################################################
 
 occu <- pres_sf %>% select(geometry) %>%
   st_join(effort_sf) %>%  # effort data transferred as well to possibly infer on 0's if there was effort, but no presence in a grid cell (only relevant if pres_opp is included too)
@@ -152,7 +223,7 @@ occu <- pres_sf %>% select(geometry) %>%
   group_by(CellID) %>% 
   mutate(Occu = if_else(n() > 0, 1, 0)) %>% # this transferres all count data into presence-absence data 
   distinct() 
-occu_sf <- grid_sf %>% left_join(occu, join_by(CellID)) # transfer to full grid 
+occu_sf <- grid_sf %>% left_join(occu, join_by(CellID, Period)) # transfer to full grid 
 occu_sf[is.na(occu_sf)] <- 0 # this replaces all NAs - places where no species where seen and no effort occured - to 0's
 
 

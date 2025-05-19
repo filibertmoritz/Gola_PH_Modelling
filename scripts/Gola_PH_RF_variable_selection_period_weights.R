@@ -69,6 +69,41 @@ envCovs_sf <- grid_sf %>% left_join(envCovs, join_by(CellID)) %>% st_as_sf()# tr
 rm(envCovs)
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##### 3. Create yearly envCov data  #####
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# create period column
+envCovs_sf_period <- envCovs_sf %>% 
+  mutate(Period = as.factor('2011-2017')) %>%
+  rbind(envCovs_sf %>% mutate(Period = as.factor('2018-2025'))) 
+
+# remove data from 2017 
+envCovs_sf_period <- envCovs_sf_period %>%
+  select(!matches('2017')) 
+
+# create yearly siteCovs
+yearly_envCovs <- sub('_2021', '', names(envCovs_sf_period)[grepl('2021', names(envCovs_sf_period))])
+
+# merge columns depending on period for each yearly/period specific environmental covariate
+for(y in yearly_envCovs){
+  envCovs_sf_period <- envCovs_sf_period %>% 
+    mutate(!!y := case_when(Period == '2011-2017' ~ .[[paste0(y, "_2013")]], 
+                                   Period == '2018-2025' ~ .[[paste0(y, "_2021")]], 
+                                   TRUE ~ NA_real_))
+}
+
+# remove unneeded columns - NDVI, EVI, JRC annual changes 
+envCovs_sf_period <- envCovs_sf_period %>%
+  select(-matches("^NDVI_.*_(2013|2021)$"), -matches("^EVI_.*_(2013|2021)$"), 
+         -matches("^JRC_ann_changes_.*_(2013|2021)$"), 
+         -JRC_transition_Undisturbed_tropical_moist_forest, -area) # remove this column because it is probably very similar to JRC_ann_changes_Undisturbed_tropical_moist_forest
+
+# change column names to remove prefix (JRC....)
+names(envCovs_sf_period) <- sub('JRC_ann_changes_|JRC_transition_', '', names(envCovs_sf_period))
+str(envCovs_sf_period)
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ##### 3. Merge all presence data into one big data frame #####
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -88,46 +123,33 @@ pres_sf <- bind_rows(pres_cam,
   st_as_sf(coords = c('UTM_X_meters', 'UTM_Y_meters'), remove = F, crs = 32629)
 
 
-## this checks out what steffen suggested 
-#ntree <- 1500
-#weightsmatrix <- matrix(NA, nrow = dim(pres_sf)[1], ncol = ntree) # this creates a matrix with ntree columns and number of sites for rows - for every tree there is a column with all sites 
-
-## fill in the different periods (2011-2017 is 0 and 2018-2025 is 1)
-#names <- levels(pres_sf$Period) # use period as grouping factor 
-#treeseq <- rep(1:5, 300)
-#for(i in 1:ntree){
-#  weightsmatrix[,i] <- if_else(pres_sf$Period == names)
-#}
-
-
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ##### 4. Create effort variable #####
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-# effort variable for camera trap data 
+# calculate effort variable for camera trap data 
 deploy_cam_sf <- deploy_cam_sf %>% 
   mutate(Deployment_Time = as.numeric(difftime(Collection, Deployment, units = 'days')), # calculate deployment time in days
-         Period = as.factor(if_else(year(Collection) <= 2017, '2011-2017', '2018-2025'))) 
+         Period = as.factor(if_else(year(Collection) <= 2017, '2011-2017', '2018-2025'))) # add period variable 
 
-effort_cam <- deploy_cam_sf %>% # sum up deployment time and number of cameras per cell per period
+effort_cam <- deploy_cam_sf %>% # sum up deployment time and number of cameras per cell and period
   st_join(grid_sf) %>% group_by(CellID, Period) %>% 
   summarise(CameraEffort_Time = sum(Deployment_Time), 
             CameraEffort_N = n(), 
             .groups = 'keep') %>% 
   st_drop_geometry()
 
-# effort variable for transect data 
+# calculate effort variable for transect data 
 effort_transects <- locs_transects %>% 
-  mutate(Period = as.factor(if_else(year(DateTime_End) <= 2017, '2011-2017', '2018-2025'))) %>%
-  st_intersection(grid_sf) %>%  # drops all the cells where no trancests are
+  mutate(Period = as.factor(if_else(year(DateTime_End) <= 2017, '2011-2017', '2018-2025'))) %>% # add period variable
+  st_intersection(grid_sf) %>%  # drops all the cells where no transects are
   mutate(TransectEffort_Length = set_units(st_length(geometry, which = 'Euclidean'), 'm')) %>%  # compute length of each river segment per grid cell, in m (which is the unit of the projected CRS)
-  group_by(CellID, Period) %>%  # group by grid cell
+  group_by(CellID, Period) %>%  # group by grid cell and period
   summarise(TransectEffort_Length = as.numeric(sum(TransectEffort_Length, na.rm = TRUE)))%>%
   st_drop_geometry()
 
 # bring effort data together, beforehand create a template grid with a CellID for each Time period
-effort_sf <- grid_sf %>% 
-  mutate(Period = as.factor('2011-2017')) %>% rbind(grid_sf %>% mutate(Period = as.factor('2018-2025'))) %>%
+effort_sf <- envCovs_sf_period %>% select(CellID, Period) %>%
   left_join(effort_cam, join_by(CellID, Period)) %>% 
   left_join(effort_transects, join_by(CellID, Period))
 effort_sf[is.na(effort_sf)] <- 0 # replace all NAs with 0 
@@ -138,7 +160,7 @@ effort_comparison <- effort_sf %>%
   group_by(Period) %>% 
   summarise(overall_transect_effort = sum(TransectEffort_Length), # in m 
             overall_camera_time_effort = sum(CameraEffort_Time), # in days
-            overall_camera_N_effort = sum(CameraEffort_N)) %>% 
+            overall_camera_N_effort = sum(CameraEffort_N)) %>% # Number of Cameras per grid cells
   mutate(pres_trans = c(nrow(pres_transects %>% filter(year(Obs_DateTime)<= 2017)), # this calculates the number of transect presences in the first time period 
                         nrow(pres_transects %>% filter(year(Obs_DateTime)> 2017))), # this calculates the number of transect presences in the second time period 
          pres_cam = c(nrow(pres_cam %>% filter(year(Obs_DateTime)<= 2017)), # this calculates the number of camera presences in the first time period 
@@ -148,21 +170,17 @@ ratio <- effort_comparison %>% mutate(ratio_transects = pres_trans/overall_trans
                  ratio_camera_time = pres_cam/overall_camera_time_effort, # per day camera deployment we have these many PH sightings 
                  ratio_camera_N = pres_cam/overall_camera_N_effort) # per camera we have these many PH sightings
 
-################################################################################
-##### FILL SOMETHING APPROPRIATE IN ############################################
-#################################################################################
-
 # calculate factor to inflate the camera effort to the scale of meters for each time period 
 inflation <- ratio %>% mutate(cam_time_inflation = ratio_camera_time/ratio_transects) %>% pull(cam_time_inflation)
-# these factors mean, that one had to survey this many meters to equal out one camera trapping day
+# these factors mean, that one had to survey this many meters to equal out one camera trapping day for the first and the second time period
 
-# calculate effort across survey methods 
+# adjust effort across survey methods 
 effort_sf <- effort_sf %>% 
-  mutate(CameraEffort_Time_inflated = if_else(Period == '2011-2017', CameraEffort_Time*inflation[1], CameraEffort_Time*inflation[2]), 
+  mutate(CameraEffort_Time_inflated = if_else(Period == '2011-2017', CameraEffort_Time*inflation[1], CameraEffort_Time*inflation[2]), # use inflation factor for different time periods
          Effort_unscaled = CameraEffort_Time_inflated+TransectEffort_Length, 
          Effort_scaled = rescale(Effort_unscaled, to = c(0,1))) # this scales across periods, not within periods!
   
-
+# this is the old effort calculation
 
 ## calculate one effort index with rescaled variables to between 0 and 1
 # effort_sf <- effort_sf %>%
@@ -170,6 +188,7 @@ effort_sf <- effort_sf %>%
 #                           rescale(as.numeric(CameraEffort_N), to = c(0,1)) / 2), # one Camera Trap effort variable as mean from both N and Time
 #          TransectEffort = rescale(as.numeric(TransectEffort_Length), to = c(0,1)), # rescaled Transect length per cell
 #          Effort = (CameraEffort + (TransectEffort))/2) # mean of both efforts
+
 
 # remove unneeded effort objects 
 rm(effort_cam, effort_transects, ratio, inflation)
@@ -187,43 +206,28 @@ tm_shape(pres_sf) +
   tm_symbols(fill = 'brown', shape = 3)
 
 
-effort_sf %>% filter(Effort_scaled > 0) %>% nrow() # there are 420 cells where surveys were performed in both periods
+effort_sf %>% filter(Effort_scaled > 0) %>% nrow() # there are 420 cells where surveys were performed across periods
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ##### 5. Create presence-absence information per grid cell and period #####
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#################################################################################
-###### SOMEHOWE THIS DOES NOT REALLY WORk #######################################
-##################################################################################
-
-# even if there is no effort in this time period, the loop fills in a 1 for a presence if there is another presence in the other period
-
-occu_list <- list()
+occu_list <- list() # create input list
 for(p in unique(pres_sf$Period)){
-  occu_list[[p]] <- pres_sf %>% filter(Period == p) %>%
+  occu_list[[p]] <- pres_sf %>% filter(Period == p) %>% # filter presence df for correct period
     select(geometry) %>%
-    st_join(effort_sf) %>%  # effort data transferred as well to possibly infer on 0's if there was effort, but no presence in a grid cell (only relevant if pres_opp is included too)
+    st_join(effort_sf %>% filter(Period == p)) %>%  # effort data transferred as well to possibly infer on 0's if there was effort, but no presence in a grid cell (only relevant if pres_opp is included too)
     st_drop_geometry() %>% 
     group_by(CellID) %>% 
     mutate(Occu = if_else(n() > 0, 1, 0)) %>% # this transferres all count data into presence-absence data 
     distinct()
 }
+occu <- bind_rows(occu_list) # bind all df from list together
+rm(occu_list) # remove list which isn't needed anymore
 
-occu <- bind_rows(occu_list)
-
-################################################################################
-##### unTIL HERE ################################
-################################################################################
-
-occu <- pres_sf %>% select(geometry) %>%
-  st_join(effort_sf) %>%  # effort data transferred as well to possibly infer on 0's if there was effort, but no presence in a grid cell (only relevant if pres_opp is included too)
-  st_drop_geometry() %>% 
-  group_by(CellID) %>% 
-  mutate(Occu = if_else(n() > 0, 1, 0)) %>% # this transferres all count data into presence-absence data 
-  distinct() 
-occu_sf <- grid_sf %>% left_join(occu, join_by(CellID, Period)) # transfer to full grid 
+occu_sf <- envCovs_sf_period %>% select(CellID, Period) %>% # get grid for each time period
+  left_join(occu, join_by(CellID, Period)) # transfer presences per grid cell and period to full grid 
 occu_sf[is.na(occu_sf)] <- 0 # this replaces all NAs - places where no species where seen and no effort occured - to 0's
 
 
@@ -232,27 +236,31 @@ occu_sf[is.na(occu_sf)] <- 0 # this replaces all NAs - places where no species w
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 # data overview
-effort_sf %>% class()
+effort_sf %>% str()
 envCovs_sf %>% class()
 occu_sf %>% class()
 
-# create one massive data frame 
-data <- envCovs_sf %>% 
-  left_join(effort_sf %>% st_drop_geometry(), join_by(CellID)) %>% 
-  left_join(occu_sf %>% select(CellID, Occu) %>% st_drop_geometry(), join_by(CellID))
+# create one massive data frame with all data
+data <- envCovs_sf_period %>% 
+  left_join(effort_sf %>% st_drop_geometry(), join_by(CellID, Period)) %>% 
+  left_join(occu_sf %>% select(CellID, Occu, Period) %>% st_drop_geometry(), join_by(CellID, Period))
 
 # create a training data set where either a presence was observed or surveys were performed!
 traindata <- data %>% 
-  filter(Occu == 1 | Effort > 0) %>% # this filters for all cases where Effort > 0 and also includes all grid cells with presences (to correctly handle presence-only data)
+  filter(Occu == 1 | Effort_scaled > 0) %>% # this filters for all cases where Effort > 0 and also includes all grid cells with presences (to correctly handle presence-only data)
   st_drop_geometry()
+
 
 # create a separate response variable which a) incorporates the Effort but b) doesn't become Inf from dividing by 0
 traindata <- traindata %>% 
-  mutate(# Effort_manipulated = if_else(Occu == 1 & Effort == 0, 0.0001, Effort), # if effort is 0 but an opportunistic presence occured, this ensures, that no Inf occures! ITS A BIT CRUDE
-         CameraEffort_Time = as.numeric(CameraEffort_Time), 
+  mutate(CameraEffort_Time = as.numeric(CameraEffort_Time), 
          TransectEffort_Length = as.numeric(TransectEffort_Length),
-         Occu_Effort = Occu*Effort) # divide Occu by Effort (if presence-only data considered - unse Effort_manipulated instead)
+         Occu_Effort = Occu*Effort_scaled) # divide Occu by Effort (if presence-only data considered - unse Effort_manipulated instead)
 
+# the relevant variables are now: 
+#     1. Occu_Effort - the occupancy multiplied by effort (Occu-Effort ratio), 
+#     2. TransectEffort_Length (Effort for all transects in m), 
+#     3. CameraEffort_Time - camera trapping effort in days
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ##### 7. Train random forest model and compute variable importance #####
@@ -281,20 +289,25 @@ traindata <- traindata %>%
 #     d)  Valavi et al. 2023: class overlap (presence/absence is not clearly distinguishable by one variable - common for changes in occupancy across ecological gradients and rare species)
 #         - solutions in paper, also example code
 
-
-names(traindata)
-
 # get all predictors from data set
-traindata <- traindata  %>% 
-  st_drop_geometry() %>% 
-  select(-CellID, -area, -JRC_transition_Undisturbed_tropical_moist_forest,-matches("2013|2021"))  # remove unneeded variables 
-colnames(traindata) <- str_remove_all(colnames(traindata), 'JRC_ann_changes_|JRC_transition_')
-pred <- names(traindata)[!grepl("Occu|Effort", names(traindata))] # get all predictor names which are not connected to effort or occu
+traindata <- traindata  %>% st_drop_geometry() # remove geometry
+pred <- names(traindata)[!grepl("Occu|Effort|Period|CellID", names(traindata))] # get all predictor names which are not connected to effort or occu
 
-# built formulas
+# built formulas and set parameters
 f_without_effort <- as.formula(paste('as.factor(Occu)', "~", paste(pred, collapse = " + "))) # classification RF without consideration of survey effort 
-f_effort_pred <- as.formula(paste('as.factor(Occu)', "~", paste(pred, collapse = " + "), '+ Effort')) # classification RF with consideration of survey effort as predictor variable
+f_effort_pred <- as.formula(paste('as.factor(Occu)', "~", paste(pred, collapse = " + "), '+ TransectEffort_Length + CameraEffort_Time')) # classification RF with consideration of survey effort as predictor variable
 f_occu_effort_response <- as.formula(paste('Occu_Effort', "~", paste(pred, collapse = " + "))) # regression random forest with consideration by modelling Occu-Effort ratio as response variable
+
+# sort data and create weights matrix
+traindata <- traindata %>% arrange(Period, CellID) %>% select(CellID, Period, everything())
+ntree <- 2000
+weightsmatrix <- matrix(NA, nrow = nrow(traindata), ncol = ntree) # initialize matrix
+period <- levels(traindata$Period) # get different periods
+treeseq <- rep(period, ntree/2)
+for(i in 1:ntree){weightsmatrix[,i] <- if_else(traindata$Period == treeseq[i], 0, 1)} # create weightmatrix with 0 for first period and 1 for other period, next column the other way round
+
+weightsmatrix[,1]; weightsmatrix[,2] # check that everything went okay - should be complimentary
+
 
 # preparation to built fr in loop
 formulas <- list(f_without_effort, f_effort_pred, f_occu_effort_response) # save all formulas in a list
@@ -307,10 +320,88 @@ for(f in formulas){
   model_name <- paste0('cr', names(formulas)[i])
   models[[model_name]] <- cforest(formula =  f,
     data = traindata, 
-    controls = cforest_control(ntree = 2000, 
+    weights = weightsmatrix,
+    controls = cforest_control(ntree = ntree, 
                                mtry = length(attr(terms(f), "term.labels"))/2)) # calculates number of predictors and divides by 2
   i <- i+1 # count 1 further
 }
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##### 8. Extract and calculate performance measures for all 3 randomforests #####
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+library(pROC) # needed for ROC and AUC calculation
+
+# confusion matrix
+conf_matrix <- table(traindata$Occu, predict(models$crf_without_effort, OOB = TRUE))
+
+# calculate oob error
+oob_error <- 1 - (sum(diag(conf_matrix)) / sum(conf_matrix)) # diag extracts the correctly classified counts from the diagonal of the confusion matrix
+
+# calculate ROC (true-positive-rate as y-axis and false-positive-rate as x-axis) and AUC
+roc(traindata$Occu, as.numeric(predict(models$crf_without_effort, OOB = TRUE)))
+
+
+# predict using the OOB = T and extract predicted probabilities from list
+prob <- predict(models$crf_effort_pred, OOB = TRUE, type = 'prob')
+pred_prob <- numeric(length(prob)) # create input vector
+for (i in 1:length(prob)) {
+  pred_prob[i] <- prob[[i]][2] # 1 is 0 (absence) and 2 is 1 (presence)
+}
+
+# calculate ROC and AUC from predicted probabilities of the classification tree
+roc(traindata$Occu, pred_prob)
+auc(roc(traindata$Occu, pred_prob))
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##### 9. Predict Occupancy across Gola as validation #####
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+pred_occu <- data.frame(CellID = numeric(), Occupancy = numeric(), Period = factor(), Model = factor())
+
+for(m in 1:length(models)){
+  raw_pred <- predict(models[[m]], newdata = data, type = 'prob')
+  
+  pred_vect <- numeric(length(prob)) # create input vector
+  for (i in 1:length(raw_pred)) {
+    pred_vect[i] <- if_else(grepl('crf_occu_effort_response', names(models)[m]), raw_pred[[i]][1],raw_pred[[i]][2])} # 1 is 0 (absence) and 2 is 1 (presence)
+  
+  p <- data.frame(Occupancy = pred_vect, 
+                  Period = factor(data$Period), 
+                  CellID = data$CellID, 
+                  Model = factor(names(models)[m]))
+  pred_occu <- rbind(pred_occu, p)
+}
+
+raw_pred[[1]][1]
+
+# make a better df for plotting
+pred_occu_plot <- envCovs_sf_period %>% # add geometry
+  select(CellID, Period) %>% 
+  left_join(pred_occu, join_by(CellID, Period)) %>% 
+  group_by(Model) %>% 
+  mutate(Occupancy_scaled = rescale(Occupancy,to = c(0,1)))  %>% # scale to 0 and 1 within each model
+  mutate(Model = case_when(Model == 'crf_without_effort'~ 'a) Model without consideration of effort.', 
+                           Model == 'crf_occu_effort_response' ~ 'b) Model with occupancy-effort ratio as response variable.', 
+                           Model == 'crf_effort_pred' ~ 'c) Model with effort as predictor variable.'))
+  
+# plot predictions - different predictions for different periods originate from the usage of different (period-specific) covariated per period
+ggplot(pred_occu_plot) +
+  geom_sf(aes(fill = Occupancy_scaled), alpha = 1) +
+  facet_grid(Period~Model) +
+  scale_fill_viridis_c(option = 'plasma', direction = -1) +  # Use a color gradient (or use scale_fill_gradient())
+  labs(title = "Pygmy Hippo Distributon in Gola, Sierra Leone",
+       subtitle = 'Predictions from multiple different conditional random forest SDM`s with period as random effect', 
+       fill = "Rescaled \nPredicted \nOccupancy \n", 
+       x = 'Longitude', y = 'Latitude') +
+  theme_bw()
+
+
+################################################################################
+##### CONTINUE HERE ############################################################
+################################################################################
+
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

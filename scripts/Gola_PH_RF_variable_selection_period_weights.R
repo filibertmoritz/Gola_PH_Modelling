@@ -79,7 +79,7 @@ envCovs_sf_period <- envCovs_sf %>%
 
 # remove data from 2017 
 envCovs_sf_period <- envCovs_sf_period %>%
-  select(!matches('2017')) 
+  select(-matches('2017')) 
 
 # create yearly siteCovs
 yearly_envCovs <- sub('_2021', '', names(envCovs_sf_period)[grepl('2021', names(envCovs_sf_period))])
@@ -96,6 +96,7 @@ for(y in yearly_envCovs){
 envCovs_sf_period <- envCovs_sf_period %>%
   select(-matches("^NDVI_.*_(2013|2021)$"), -matches("^EVI_.*_(2013|2021)$"), 
          -matches("^JRC_ann_changes_.*_(2013|2021)$"), 
+         -matches('JRC_transition'),
          -JRC_transition_Undisturbed_tropical_moist_forest, -area) # remove this column because it is probably very similar to JRC_ann_changes_Undisturbed_tropical_moist_forest
 
 # change column names to remove prefix (JRC....)
@@ -374,7 +375,6 @@ for(m in 1:length(models)){
   pred_occu <- rbind(pred_occu, p)
 }
 
-raw_pred[[1]][1]
 
 # make a better df for plotting
 pred_occu_plot <- envCovs_sf_period %>% # add geometry
@@ -398,12 +398,6 @@ ggplot(pred_occu_plot) +
   theme_bw()
 
 
-################################################################################
-##### CONTINUE HERE ############################################################
-################################################################################
-
-
-
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ##### 8. Calculate AUC Variable Importance for each RF #####
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -416,7 +410,6 @@ ggplot(pred_occu_plot) +
 ## 3. moreparty - 
 # # moreparty::fastvarImpAUC(crf1, conditional = T, parallel = T)# or without conditional
 
-
 # be aware that this takes some time!
 
 # calculate AUC Variable importance 10 times for each model 
@@ -424,15 +417,16 @@ results_vip <- data.frame(model = factor(), iter = numeric(), variable = charact
 
 for(m_names in names(models)){
   m <- models[[m_names]]
-  for(n in 1:10){ # this could also be done in nperm within varImpAUC, however it may not be 
+  for(n in 1:10){ # this could also be done in nperm within varImpAUC, however it may not be as easy to extract the individual values 
     if(grepl("as\\.factor", as.character(m@data@formula$response[2]))){
       v <- moreparty::fastvarImpAUC(m, conditional = 0, parallel = T)} # v <- party::varimpAUC(m, conditional = T) # alternatively moreparty::varImpAUC(m, conditional = 0, parallel = T) or varImp::varImpAUC
     else{
-      v <- party::varimp(m, conditional = T)} # use normal varImp since AUC is not possible in regression classifications 
+      v <- party::varimp(m, conditional = T)} # use normal varImp since AUC is not possible in regression forests  
     r <- data.frame(model = m_names, iter = n, variable = names(v), importance = v)
     results_vip <- rbind(results_vip, r)
   }
 }
+
 
 # calculate mean AUC varImp per model and variable
 results_vip <- results_vip %>% 
@@ -440,41 +434,50 @@ results_vip <- results_vip %>%
   mutate(mean_importance = mean(importance)) %>% 
   group_by(model) %>% 
   mutate(variation = abs(min(importance)), 
-         # rel_mean_importance = rescale(mean_importance, c(0,1))
-         )
+         rel_mean_importance = rescale(mean_importance, c(0,1)), 
+         max_importance = max(mean_importance),
+         importance_scaled = importance / max_importance,
+         mean_importance_scaled = mean_importance / max_importance,
+         variation_scaled = variation / max_importance) %>% ungroup()
 
 
 # plot variable importance and save
-plot <- results_vip %>% 
-  mutate(Model = case_when(model == 'crf_without_effort'~ 'a) Model without consideration of effort.', 
-                           model == 'crf_occu_effort_response' ~ 'b) Model with occupancy-effort ratio as response variable.', 
-                           model == 'crf_effort_pred' ~ 'c) Model with effort as predictor variable.'), 
-         Variable = case_when(variable == 'Distance_large_river' ~ 'Distance to large river', 
-                              variable == 'mean_elev' ~ 'Elevation', 
-                              variable == 'river_density_med_large'~ 'Density of medium and large rivers', 
-                              variable == 'Distance_road'~ 'Distance to roads', 
-                              variable == 'Reserve_Type'~ 'Reserve Type', 
-                              .default = variable))  %>% 
+plot <- results_vip %>%
+  mutate(Model = case_when(
+    model == 'crf_without_effort' ~ 'c) Model without consideration of effort.',
+    model == 'crf_occu_effort_response' ~ 'b) Model with occupancy-effort ratio as response variable.',
+    model == 'crf_effort_pred' ~ 'a) Model with effort as predictor variable.'),
+    Variable = case_when(
+      variable == 'Distance_large_river' ~ 'Distance to large river',
+      variable == 'mean_elev' ~ 'Elevation',
+      variable == 'river_density_med_large' ~ 'Density of medium and large rivers',
+      variable == 'Distance_road' ~ 'Distance to roads',
+      variable == 'Reserve_Type' ~ 'Reserve Type', 
+      variable == 'CameraEffort_Time' ~ 'Camera Trapping Days', 
+      variable == 'TransectEffort_Length' ~ 'Reserve Type', 
+      variable == 'Reserve_Type' ~ 'Reserve Type', 
+      variable == 'Reserve_Type' ~ 'Reserve Type', 
+      variable == 'Reserve_Type' ~ 'Reserve Type', 
+      variable == 'Reserve_Type' ~ 'Reserve Type', 
+      variable == 'Reserve_Type' ~ 'Reserve Type',
+      .default = variable)) %>%
   ggplot() +
-  geom_point(aes(x = reorder(Variable, mean_importance), y = importance, color = "Individual replicates"), alpha = 0.5, size = 1.5,
+  geom_point(aes(x = reorder(Variable, mean_importance_scaled), y = importance_scaled, color = "Individual replicates"), alpha = 0.5, size = 1.5,
              position = position_jitter(width = 0.2)) +
-  geom_segment(aes(x = reorder(Variable, mean_importance), xend = reorder(Variable, mean_importance),
-                   y = 0, yend = mean_importance, color = "Mean importance"), linewidth = .9) +
-  geom_point(aes(x = reorder(Variable, mean_importance), y = mean_importance, color = "Mean importance"), size = 1.8) +
-  geom_hline(aes(yintercept = variation, color = "Random variation"), linetype = 2) +
+  geom_segment(aes(x = reorder(Variable, mean_importance_scaled), xend = reorder(Variable, mean_importance_scaled),
+                   y = 0, yend = mean_importance_scaled, color = "Mean importance"), linewidth = .9) +
+  geom_point(aes(x = reorder(Variable, mean_importance_scaled), y = mean_importance_scaled, color = "Mean importance"), size = 2.6) +
+  geom_hline(aes(yintercept = variation_scaled, color = "Random variation"), linetype = 2) +
   coord_flip() +
-  facet_grid(. ~ Model, scales = "free", switch = "y") + 
+  facet_grid(. ~ Model, scales = "free") + 
   scale_color_manual(name = "Legend",
                      values = c("Mean importance" = "firebrick", 
-                                "Mean importance" = "firebrick", 
-                                "Individual replicates" = "gray30",
+                                "Individual replicates" = "gray40",
                                 "Random variation" = "grey50")) +
-  labs(x = "Variable",
-       y = "Relative Variable Importance",
+  labs(x = "Variable", y = "Relative Variable Importance (scaled to 0-1)", 
        title = "Variable Importance") +
   theme_bw(base_size = 13) +
-  theme(legend.background = element_rect(color = "black"), 
-        legend.position = c(0.9, 0.15))
+  theme(legend.background = element_rect(color = "black"), legend.position = c(0.9, 0.15))
 ggsave(plot = plot, filename = 'output/plots/PH_crf_variable_selection.jpg', width = 16, height = 9)
 
 
@@ -483,10 +486,11 @@ ggsave(plot = plot, filename = 'output/plots/PH_crf_variable_selection.jpg', wid
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 # select 10 best predictors from all models 
-best_pred <- results_vip %>% group_by(model, variable) %>% 
+best_pred <- results_vip %>% filter(!variable %in% c('CameraEffort_Time','TransectEffort_Length')) %>%
+  group_by(model, variable) %>% 
   summarise(mean_importance = mean(importance)) %>%
-  slice_max(order_by = mean_importance, n = 6) %>% pull(variable) %>% unique()
-best_pred <- best_pred[best_pred != 'Effort'] # exclude effort
+  slice_max(order_by = mean_importance, n = 4) %>% pull(variable) %>% unique()
+best_pred <- best_pred[best_pred != c('CameraEffort_Time','TransectEffort_Length')] # exclude effort
 best_pred
 
 

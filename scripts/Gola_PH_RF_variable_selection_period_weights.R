@@ -105,7 +105,7 @@ str(envCovs_sf_period)
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-##### 3. Merge all presence data into one big data frame #####
+##### 4. Merge all presence data into one big data frame #####
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 # prepare transect presences as sf
@@ -125,7 +125,7 @@ pres_sf <- bind_rows(pres_cam,
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-##### 4. Create effort variable #####
+##### 5. Create effort variable #####
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 # calculate effort variable for camera trap data 
@@ -211,7 +211,7 @@ effort_sf %>% filter(Effort_scaled > 0) %>% nrow() # there are 420 cells where s
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-##### 5. Create presence-absence information per grid cell and period #####
+##### 6. Create presence-absence information per grid cell and period #####
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 occu_list <- list() # create input list
@@ -233,7 +233,7 @@ occu_sf[is.na(occu_sf)] <- 0 # this replaces all NAs - places where no species w
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-##### 6. Bring all data together #####
+##### 7. Bring all data together #####
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 # data overview
@@ -264,7 +264,7 @@ traindata <- traindata %>%
 #     3. CameraEffort_Time - camera trapping effort in days
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-##### 7. Train random forest model and compute variable importance #####
+##### 8. Train random forest model and compute variable importance #####
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 # Steffen recommended two options to include effort as an 'offset' into the random forest model: 
@@ -328,7 +328,7 @@ for(f in formulas){
 }
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-##### 8. Extract and calculate performance measures for all 3 randomforests #####
+##### 9. Extract and calculate performance measures for all 3 randomforests #####
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 library(pROC) # needed for ROC and AUC calculation
@@ -356,7 +356,7 @@ auc(roc(traindata$Occu, pred_prob))
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-##### 9. Predict Occupancy across Gola as validation #####
+##### 10. Predict Occupancy across Gola as validation #####
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 pred_occu <- data.frame(CellID = numeric(), Occupancy = numeric(), Period = factor(), Model = factor())
@@ -364,7 +364,12 @@ pred_occu <- data.frame(CellID = numeric(), Occupancy = numeric(), Period = fact
 for(m in 1:length(models)){
   raw_pred <- predict(models[[m]], newdata = data, type = 'prob')
   
-  pred_vect <- numeric(length(prob)) # create input vector
+  if (is.null(raw_pred)) {
+    warning(paste("Prediction failed for model", names(models)[m]))
+    next  # skip this iteration
+  }
+  
+  pred_vect <- numeric(length(raw_pred)) # create input vector
   for (i in 1:length(raw_pred)) {
     pred_vect[i] <- if_else(grepl('crf_occu_effort_response', names(models)[m]), raw_pred[[i]][1],raw_pred[[i]][2])} # 1 is 0 (absence) and 2 is 1 (presence)
   
@@ -382,12 +387,12 @@ pred_occu_plot <- envCovs_sf_period %>% # add geometry
   left_join(pred_occu, join_by(CellID, Period)) %>% 
   group_by(Model) %>% 
   mutate(Occupancy_scaled = rescale(Occupancy,to = c(0,1)))  %>% # scale to 0 and 1 within each model
-  mutate(Model = case_when(Model == 'crf_without_effort'~ 'a) Model without consideration of effort.', 
+  mutate(Model = case_when(Model == 'crf_without_effort'~ 'c) Model without consideration of effort.', 
                            Model == 'crf_occu_effort_response' ~ 'b) Model with occupancy-effort ratio as response variable.', 
-                           Model == 'crf_effort_pred' ~ 'c) Model with effort as predictor variable.'))
+                           Model == 'crf_effort_pred' ~ 'a) Model with effort as predictor variable.'))
   
 # plot predictions - different predictions for different periods originate from the usage of different (period-specific) covariated per period
-ggplot(pred_occu_plot) +
+pred_map <- ggplot(pred_occu_plot) +
   geom_sf(aes(fill = Occupancy_scaled), alpha = 1) +
   facet_grid(Period~Model) +
   scale_fill_viridis_c(option = 'plasma', direction = -1) +  # Use a color gradient (or use scale_fill_gradient())
@@ -396,10 +401,11 @@ ggplot(pred_occu_plot) +
        fill = "Rescaled \nPredicted \nOccupancy \n", 
        x = 'Longitude', y = 'Latitude') +
   theme_bw()
+ggsave(plot = pred_map, filename = 'output/plots/PH_crf_predicted_map.jpg', width = 16, height = 9)
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-##### 8. Calculate AUC Variable Importance for each RF #####
+##### 11. Calculate AUC Variable Importance for each RF #####
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 # there are mainly 3 packages to calculate variable importance from cforest objects:
@@ -429,7 +435,7 @@ for(m_names in names(models)){
 
 
 # calculate mean AUC varImp per model and variable
-results_vip <- results_vip %>% 
+results_vip_plot <- results_vip %>% 
   group_by(model, variable) %>% 
   mutate(mean_importance = mean(importance)) %>% 
   group_by(model) %>% 
@@ -440,33 +446,40 @@ results_vip <- results_vip %>%
          mean_importance_scaled = mean_importance / max_importance,
          variation_scaled = variation / max_importance) %>% ungroup()
 
+# recode the models and variable names for plotting
+results_vip_plot <- results_vip_plot %>%
+  mutate(Model = recode(model,
+                   'crf_without_effort' = 'c) Model without consideration of effort.',
+                   'crf_occu_effort_response' = 'b) Model with occupancy-effort ratio as response variable.',
+                   'crf_effort_pred' = 'a) Model with effort as predictor variable.'),
+    Variable = recode(variable,
+                      'Distance_large_river' = 'Distance to large river',
+                      'mean_elev' = 'Elevation',
+                      'river_density_med_large' = 'Density of medium and large rivers',
+                      'Distance_road' = 'Distance to roads',
+                      'Reserve_Type' = 'Reserve Type',
+                      'CameraEffort_Time' = 'Camera trapping days',
+                      'TransectEffort_Length' = 'Transect length',
+                      'mean_slope' = 'Slope',
+                      'NDVI_aug' = 'NDVI August',
+                      'NDVI_feb' = 'NDVI February',
+                      'EVI_aug' = 'EVI August',
+                      'EVI_feb' = 'EVI February',
+                      'Undisturbed_tropical_moist_forest' = 'Undisturbed tropical moist forest',
+                      'Other_land_cover' = 'Other land cover',
+                      'Permanent_and_seasonal_water' = 'Permanent and seasonal water',
+                      'Degraded_tropical_moist_forest' = 'Degraded tropical moist forest',
+                      'Tropical_moist_forest_regrowth' = 'Tropical moist forest regrowth', 
+                      'Deforested_land' = 'Deforested land'))
 
 # plot variable importance and save
-plot <- results_vip %>%
-  mutate(Model = case_when(
-    model == 'crf_without_effort' ~ 'c) Model without consideration of effort.',
-    model == 'crf_occu_effort_response' ~ 'b) Model with occupancy-effort ratio as response variable.',
-    model == 'crf_effort_pred' ~ 'a) Model with effort as predictor variable.'),
-    Variable = case_when(
-      variable == 'Distance_large_river' ~ 'Distance to large river',
-      variable == 'mean_elev' ~ 'Elevation',
-      variable == 'river_density_med_large' ~ 'Density of medium and large rivers',
-      variable == 'Distance_road' ~ 'Distance to roads',
-      variable == 'Reserve_Type' ~ 'Reserve Type', 
-      variable == 'CameraEffort_Time' ~ 'Camera Trapping Days', 
-      variable == 'TransectEffort_Length' ~ 'Reserve Type', 
-      variable == 'Reserve_Type' ~ 'Reserve Type', 
-      variable == 'Reserve_Type' ~ 'Reserve Type', 
-      variable == 'Reserve_Type' ~ 'Reserve Type', 
-      variable == 'Reserve_Type' ~ 'Reserve Type', 
-      variable == 'Reserve_Type' ~ 'Reserve Type',
-      .default = variable)) %>%
+plot <- results_vip_plot %>%
   ggplot() +
   geom_point(aes(x = reorder(Variable, mean_importance_scaled), y = importance_scaled, color = "Individual replicates"), alpha = 0.5, size = 1.5,
              position = position_jitter(width = 0.2)) +
   geom_segment(aes(x = reorder(Variable, mean_importance_scaled), xend = reorder(Variable, mean_importance_scaled),
                    y = 0, yend = mean_importance_scaled, color = "Mean importance"), linewidth = .9) +
-  geom_point(aes(x = reorder(Variable, mean_importance_scaled), y = mean_importance_scaled, color = "Mean importance"), size = 2.6) +
+  geom_point(aes(x = reorder(Variable, mean_importance_scaled), y = mean_importance_scaled, color = "Mean importance"), size = 2) +
   geom_hline(aes(yintercept = variation_scaled, color = "Random variation"), linetype = 2) +
   coord_flip() +
   facet_grid(. ~ Model, scales = "free") + 
@@ -474,31 +487,24 @@ plot <- results_vip %>%
                      values = c("Mean importance" = "firebrick", 
                                 "Individual replicates" = "gray40",
                                 "Random variation" = "grey50")) +
-  labs(x = "Variable", y = "Relative Variable Importance (scaled to 0-1)", 
-       title = "Variable Importance") +
+  labs(x = "Variable", y = "Relative Variable Importance", title = "Variable Importance") +
   theme_bw(base_size = 13) +
   theme(legend.background = element_rect(color = "black"), legend.position = c(0.9, 0.15))
 ggsave(plot = plot, filename = 'output/plots/PH_crf_variable_selection.jpg', width = 16, height = 9)
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-##### 9. Select all 5 best variables per RF #####
+##### 12. Select all 4 best variables per RF #####
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-# select 10 best predictors from all models 
-best_pred <- results_vip %>% filter(!variable %in% c('CameraEffort_Time','TransectEffort_Length')) %>%
-  group_by(model, variable) %>% 
+# select 4 best predictors from all models 
+best_pred <- results_vip_plot %>% 
+  filter(!Variable %in% c('Camera trapping days','Transect length')) %>% # exclude effort variables
+  group_by(Model, Variable) %>% 
   summarise(mean_importance = mean(importance)) %>%
-  slice_max(order_by = mean_importance, n = 4) %>% pull(variable) %>% unique()
-best_pred <- best_pred[best_pred != c('CameraEffort_Time','TransectEffort_Length')] # exclude effort
+  slice_max(order_by = mean_importance, n = 4) %>% pull(Variable) %>% unique()
 best_pred
 
-
-
-# check for correlation between best predictors
-library(corrplot)
-
-traindata[, best_pred] %>% st_drop_geometry()  %>% select(-Reserve_Type) %>% cor() %>% corrplot(type = 'lower')
 
 
 

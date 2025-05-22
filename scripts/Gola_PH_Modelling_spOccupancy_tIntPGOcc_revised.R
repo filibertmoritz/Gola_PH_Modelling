@@ -796,16 +796,51 @@ MCMCplot(best.model$alpha.samples, ref_ovl = TRUE, ci = c(50, 95),  main = "Dete
 ##### 9. Predict Occupancy throughout the study area  ######
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+
+# Get scaling parameters from vec1
+mean1 <- mean(vec1)
+sd1 <- sd(vec1)
+
+# Scale vec1
+scaled_vec1 <- scale(vec1)
+
+# Scale vec2 using vec1's parameters
+scaled_vec2 <- (vec2 - mean1) / sd1
+
+
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ##### 9.1 Prepare data for prediction ######
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 # prepare site covariates 
 
-# get all occu predictors + intercept for prediction which vary at site not year-site level
-occ.preds <- c('(Intercept)', all.vars(best.model$occ.formula)[!all.vars(best.model$occ.formula) %in% names(year.site.covs.list)])
+################################################################################
+### CONTINUE HERE ##############################################################
+################################################################################
 
-# prepare all occu covariates for prediction
+
+
+op <- all.vars(best.model$occ.formula)[!all.vars(best.model$occ.formula) %in% names(year.site.covs.list)]
+envCovs_all_scaled <- data.frame()
+for(o in op){
+  sd.sites <- sd(as.numeric(envCovs_all_unscaled[,o]))
+  mean.sites <- mean(envCovs_all_unscaled[,o])
+  
+  envCovs_all_scaled[,o] <- (envCovs_all_unscaled[,o] -mean.sites) / sd.sites
+  
+}
+
+################################################################################
+##### STOP HERE ###################################################
+################################################################################
+
+envCovs_sf %>% 
+  st_drop_geometry() %>% 
+  select(occ.preds[occ.preds != "(Intercept)"]) %>% 
+  mutate()
+
+
+
 envCovs_pred <- envCovs_sf %>%
   st_drop_geometry() %>%
   select(occ.preds[occ.preds != "(Intercept)"]) %>%
@@ -815,6 +850,7 @@ envCovs_pred <- envCovs_sf %>%
 # create an array
 X.0 <- array(NA, dim = c(nrow(envCovs_pred), length(best.model$seasons[[1]]), length(occ.preds)))
 dimnames(X.0) <- list(CellID = as.character(1:nrow(envCovs_pred)), Period = paste0("Period_", 1:length(best.model$seasons[[1]])), Occ.covs = occ.preds)
+occ.preds <- c('(Intercept)', all.vars(best.model$occ.formula)[!all.vars(best.model$occ.formula) %in% names(year.site.covs.list)]) # get all occu predictors + intercept for prediction which vary at site not year-site level
 
 # loop over all site level covariates
 for (o in occ.preds) {
@@ -864,25 +900,81 @@ for(p in 1:length(best.model$seasons[[1]])){
 }
 
 # create sf
-plot_bm_sf <- envCovs_sf %>% left_join(plot_bm, join_by(CellID))
+plot_bm_sf <- envCovs_sf %>% select(CellID) %>% 
+  left_join(plot_bm, join_by(CellID))
+
+################################################################################
+######## SEARCH MISTAKE FROM HERE ##############################################
+################################################################################
 
 
-# fancier plot
-library(ggspatial)
-plot_bm_sf %>% 
+# get information on data the model was trained with
+preds <- setdiff(all.vars(best.model$occ.formula), "Period_fact") # all predictors except of Period_fact are important here 
+pred.limits <- data.frame(variable = character(), Period = character(), train_min = numeric(), train_max = numeric())
+
+
+for(p in 1:length(best.model$seasons[[1]])){
+  for(variable in preds){
+    # if else statement to handle yearly site covs and site covs differently
+    if (is.matrix(occ.covs[[variable]])) { # yearly site covs should be a matrix 
+      train_min <- min(occ.covs[[variable]][, p])
+      train_max <- max(occ.covs[[variable]][, p])
+    } else {
+      train_min <- min(occ.covs[[variable]])
+      train_max <- max(occ.covs[[variable]])}
+    # save min and max values in a df
+    period.limits <- data.frame(variable = variable, Period = c('2011-2017', '2018-2025')[p], 
+                                train_min = train_min,train_max = train_max)
+    # aggregate results
+    pred.limits <- bind_rows(pred.limits, period.limits)
+  }
+}
+
+
+# get values predictions were made for
+pred.values <- data.frame(Period = character(), CellID = numeric())
+for(p in 1:length(best.model$seasons[[1]])){
+    df <- data.frame(Period = rep(c('2011-2017', '2018-2025')[p], times = dim(X.0)[1]),
+                     X.0[,p,]) %>% mutate(CellID = row_number())
+    df$X.Intercept. <- NULL
+    df$Period_fact <- NULL
+    pred.values <- bind_rows(pred.values, df)
+    rm(df)
+}
+
+# bring pred values into long format 
+pred.values = pred.values %>%
+  pivot_longer(cols = -c(CellID, Period),
+    names_to = "variable",
+    values_to = "value") 
+
+# put the respective min and max values in there as well, specific to period and variable
+pred.values <- pred.values %>% 
+  left_join(pred.limits, join_by(variable, Period), relationship = 'many-to-many')
+
+# flag all values that lie within the borders of what the model was trained for, flag extrapolations
+flag <- pred.values %>% ungroup() %>% 
+  mutate(extrapol = if_else(value > train_min & value < train_max, 1, 0.5)) %>% 
+  group_by(CellID, Period) %>% 
+  summarise(flag = sum(extrapol), 
+            alpha = if_else(sum(extrapol) == length(preds), 1, 0.5))
+
+
+# plot prediction
+plot_bm_sf %>% left_join(flag, join_by(CellID, Period)) %>% # filter(alpha == 1)
   ggplot() +
   #annotation_map_tile(zoom = 10, type = 'cartolight') +
-  geom_sf(aes(fill = pred_mean), # color = NA, 
-          alpha = 1) +  # Use pred_mean for fill color
-  scale_fill_viridis_c(option = "plasma", name = "Mean Predicted Occupancy", limits = c(0,1), direction = -1) + # scale_fill_viridis_c(option = "magma"), or replace "magma" with "inferno", "plasma", "cividis", 
+  geom_sf(aes(fill = pred_mean, alpha = 1)) +  # Use pred_mean for fill color
+  scale_fill_viridis_c(option = "plasma", name = "Predicted \nOccupancy", limits = c(0,1), direction = -1) + # scale_fill_viridis_c(option = "magma"), or replace "magma" with "inferno", "plasma", "cividis", 
   facet_grid(~Period) +
   theme_bw() +
-  theme(legend.position = "bottom", 
+  theme(legend.position = c(0.95, 0.25), 
         panel.border = element_rect(color = "darkgrey", fill = NA, linewidth = 1), # add frame
         axis.line = element_blank()) +
   labs(title = "Predicted Pygmy Hippo Occupancy Probability", 
        subtitle = "Based on an Static Multi Year Integrated Occupancy Model fitted in spOccupancy", 
        x = 'Longitude', y = 'Latutude')
+
 #ggsave(filename = 'output/plots/PH_hotspot_map_all_data.jpg', plot = hotspot_map, height = 6, width = 12)
 
 
@@ -948,10 +1040,6 @@ plot.mrgnl.effects <- plot.mrgnl.effects %>%
                            "Undisturbed_tropical_moist_forest" = "Undisturbed tropical moist forest")) 
 
 # add unscaled values to marginal effects df 
-
-
-###### STOPPED HERE ################
-
 
 test <- plot.mrgnl.effects %>% 
   mutate(value_unscaled = case_when(variable == 'mean_elev' & Period == '2011-2017' ~ 

@@ -790,67 +790,48 @@ library(MCMCvis)
 MCMCplot(best.model$beta.samples, ref_ovl = TRUE, ci = c(50, 95),  main = "Occupancy Effect Sizes")
 MCMCplot(best.model$alpha.samples, ref_ovl = TRUE, ci = c(50, 95),  main = "Detection Effect Sizes")
 
-
-
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ##### 9. Predict Occupancy throughout the study area  ######
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+# THIS IS THE STRATEGY I APPLIED TO SCALE THE VALUES IN THE SAME WAY AS I DID BEFORE FITTING THE MODEL
 
 # Get scaling parameters from vec1
-mean1 <- mean(vec1)
-sd1 <- sd(vec1)
+# mean1 <- mean(vec1)
+# sd1 <- sd(vec1)
 
 # Scale vec1
-scaled_vec1 <- scale(vec1)
+# scaled_vec1 <- scale(vec1)
 
 # Scale vec2 using vec1's parameters
-scaled_vec2 <- (vec2 - mean1) / sd1
+# scaled_vec2 <- (vec2 - mean1) / sd1
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ##### 9.1 Prepare data for prediction ######
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-# prepare site covariates 
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##### 9.1.1 SiteCovs ######
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-################################################################################
-### CONTINUE HERE ##############################################################
-################################################################################
-
-
-
+# get site covariates and normalize then with the same parameters as scaling was done before model fitting 
 op <- all.vars(best.model$occ.formula)[!all.vars(best.model$occ.formula) %in% names(year.site.covs.list)]
-envCovs_all_scaled <- data.frame()
+envCovs_pred <- envCovs_sf[,c(op, 'CellID')] %>% st_drop_geometry()
 for(o in op){
-  sd.sites <- sd(as.numeric(envCovs_all_unscaled[,o]))
-  mean.sites <- mean(envCovs_all_unscaled[,o])
+  sd.sites <- sd(as.numeric(envCovs_all_unscaled[[o]])) # use the data the model was fitted with for calculation of mean and sd for normalization
+  mean.sites <- mean(envCovs_all_unscaled[[o]])
   
-  envCovs_all_scaled[,o] <- (envCovs_all_unscaled[,o] -mean.sites) / sd.sites
-  
+  envCovs_pred[[o]] <- (envCovs_sf[[o]] -mean.sites) / sd.sites # apply above calc normalization factors to whole study area envCovs 
 }
 
-################################################################################
-##### STOP HERE ###################################################
-################################################################################
-
-envCovs_sf %>% 
-  st_drop_geometry() %>% 
-  select(occ.preds[occ.preds != "(Intercept)"]) %>% 
-  mutate()
-
-
-
-envCovs_pred <- envCovs_sf %>%
-  st_drop_geometry() %>%
-  select(occ.preds[occ.preds != "(Intercept)"]) %>%
-  mutate(across(everything(), ~ scale(.) %>% as.vector())) %>%  
-  mutate(`(Intercept)` = 1) # extrac column with 1's for Intercept 
+envCovs_pred <- envCovs_pred %>% 
+  mutate(`(Intercept)` = 1)
 
 # create an array
-X.0 <- array(NA, dim = c(nrow(envCovs_pred), length(best.model$seasons[[1]]), length(occ.preds)))
-dimnames(X.0) <- list(CellID = as.character(1:nrow(envCovs_pred)), Period = paste0("Period_", 1:length(best.model$seasons[[1]])), Occ.covs = occ.preds)
 occ.preds <- c('(Intercept)', all.vars(best.model$occ.formula)[!all.vars(best.model$occ.formula) %in% names(year.site.covs.list)]) # get all occu predictors + intercept for prediction which vary at site not year-site level
+X.0 <- array(NA, dim = c(nrow(envCovs_pred), length(best.model$seasons[[1]]), length(occ.preds)))
+dimnames(X.0) <- list(CellID = as.character(envCovs_pred$CellID), Period = paste0("Period_", 1:length(best.model$seasons[[1]])), Occ.covs = occ.preds)
 
 # loop over all site level covariates
 for (o in occ.preds) {
@@ -859,24 +840,61 @@ for (o in occ.preds) {
   }
 }
 
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##### 9.1.2 yearly SiteCovs ######
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+all.vars(best.model$occ.formula)[all.vars(best.model$occ.formula) %in% names(year.site.covs.list) ] # these are all the variables at yearly site level
+year.occ.preds <- all.vars(best.model$occ.formula)[all.vars(best.model$occ.formula) %in% names(year.site.covs.list) & all.vars(best.model$occ.formula) != "Period_fact"] # these are all yearly site covs but without Period
+year.occ.preds.array <- array(data = NA, dim = c(nrow(envCovs), length(best.model$seasons[[1]]), length(year.occ.preds)))
+dimnames(year.occ.preds.array) <- list(CellID = as.character(envCovs_pred$CellID), Period = paste0("Period_", 1:length(best.model$seasons[[1]])), Occ.covs = year.occ.preds)
+
+for(year.occ in year.occ.preds){
+  
+  # pool both years since normalization was done across years before model fitting
+  year.envCovs <- c(envCovs_all_unscaled[[paste0('JRC_ann_changes_', year.occ, '_2013')]], 
+                    envCovs_all_unscaled[[paste0('JRC_ann_changes_', year.occ, '_2021')]])
+  
+  sd.sites <- sd(year.envCovs)
+  mean.sites <- mean(year.envCovs)
+  
+  year.occ.preds.array[,,year.occ] <- (c(envCovs_sf[[paste0('JRC_ann_changes_', year.occ, '_2013')]], 
+                                        envCovs_sf[[paste0('JRC_ann_changes_', year.occ, '_2021')]]) -mean.sites) /sd.sites
+}
 
 
-# prepare yearly site covariates 
 
-# these are all the variables at yearly site level
-all.vars(best.model$occ.formula)[all.vars(best.model$occ.formula) %in% names(year.site.covs.list) ]
+# bring yeary site covs and site covs together 
+library(abind)
+X.0 <- abind(X.0, occ.preds.year, along = 3)
+X.0 <- X.0[,,c('(Intercept)', all.vars(best.model$occ.formula))] # this ensures, that the variables are in the correct order!
 
-occ.preds.year <- array(data = c(as.numeric(scale(c(envCovs$JRC_ann_changes_Undisturbed_tropical_moist_forest_2013, envCovs$JRC_ann_changes_Undisturbed_tropical_moist_forest_2021))), 
-                                 as.numeric(scale(c(envCovs$JRC_ann_changes_Permanent_and_seasonal_water_2013, envCovs$JRC_ann_changes_Permanent_and_seasonal_water_2021))),
-                                 #as.numeric(scale(rep(c(1, 2), each = nrow(envCovs)))),
-                                 as.factor(rep(c('2011-2017', '2018-2025'), each = nrow(envCovs)))), 
-      dim = c(nrow(envCovs), 2, 3), 
-      dimnames = list(paste0(1:nrow(envCovs)), paste0("Period_", 1:length(best.model$seasons[[1]])),c( 'Undisturbed_tropical_moist_forest',"Permanent_and_seasonal_water",'Period_fact')))
+
+
+#################################################################################
+#for(year.occ in year.occ.preds){
+#  for (s in 1:length(best.model$seasons[[1]])){
+#    variable <- paste0('JRC_ann_changes_', year.occ, c('_2013', '_2021')[s])
+#    
+#    sd.sites <- sd(as.numeric(envCovs_all_unscaled[[variable]])) # use the data the model was fitted with for calculation of mean and sd for normalization
+#    mean.sites <- mean(envCovs_all_unscaled[[variable]])
+    
+#    year.occ.preds.array[,s,year.occ] <- (envCovs_sf[[variable]] -mean.sites) / sd.sites # apply above calc normalization factors to whole study area envCovs 
+#  }
+#}
+
+
+#occ.preds.year <- array(data = c(as.numeric(scale(c(envCovs$JRC_ann_changes_Undisturbed_tropical_moist_forest_2013, envCovs$JRC_ann_changes_Undisturbed_tropical_moist_forest_2021))), 
+#                                 as.numeric(scale(c(envCovs$JRC_ann_changes_Permanent_and_seasonal_water_2013, envCovs$JRC_ann_changes_Permanent_and_seasonal_water_2021))),
+#                                 #as.numeric(scale(rep(c(1, 2), each = nrow(envCovs)))),
+#                                 as.factor(rep(c('2011-2017', '2018-2025'), each = nrow(envCovs)))), 
+#      dim = c(nrow(envCovs), 2, 3), 
+#      dimnames = list(paste0(1:nrow(envCovs)), paste0("Period_", 1:length(best.model$seasons[[1]])),c( 'Undisturbed_tropical_moist_forest',"Permanent_and_seasonal_water",'Period_fact')))
 
 # bring all prepared occ.covs for prediction together into one array 
-library(abind) # this is a package which makes binding arrays much easier
-X.0 <- abind(X.0, occ.preds.year, along = 3) 
-X.0 <- X.0[,,c('(Intercept)', all.vars(best.model$occ.formula))] # this ensures, that the variables are in the correct order!
+#library(abind) # this is a package which makes binding arrays much easier
+#X.0 <- abind(X.0, occ.preds.year, along = 3) 
+#X.0 <- X.0[,,c('(Intercept)', all.vars(best.model$occ.formula))] # this ensures, that the variables are in the correct order!
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -930,6 +948,10 @@ for(p in 1:length(best.model$seasons[[1]])){
   }
 }
 
+# check, that I took the correct values 
+X.0[sites.idx$CellID,, 'Permanent_and_seasonal_water'][1:5,]; occ.covs[['Permanent_and_seasonal_water']][1:5,]
+
+
 
 # get values predictions were made for
 pred.values <- data.frame(Period = character(), CellID = numeric())
@@ -957,14 +979,14 @@ flag <- pred.values %>% ungroup() %>%
   mutate(extrapol = if_else(value > train_min & value < train_max, 1, 0.5)) %>% 
   group_by(CellID, Period) %>% 
   summarise(flag = sum(extrapol), 
-            alpha = if_else(sum(extrapol) == length(preds), 1, 0.5))
+            alpha = as.numeric(if_else(sum(extrapol) > 3.5, 1, 0.95)))
 
 
 # plot prediction
 plot_bm_sf %>% left_join(flag, join_by(CellID, Period)) %>% # filter(alpha == 1)
   ggplot() +
   #annotation_map_tile(zoom = 10, type = 'cartolight') +
-  geom_sf(aes(fill = pred_mean, alpha = 1)) +  # Use pred_mean for fill color
+  geom_sf(aes(fill = pred_mean, alpha = alpha)) +  # Use pred_mean for fill color
   scale_fill_viridis_c(option = "plasma", name = "Predicted \nOccupancy", limits = c(0,1), direction = -1) + # scale_fill_viridis_c(option = "magma"), or replace "magma" with "inferno", "plasma", "cividis", 
   facet_grid(~Period) +
   theme_bw() +

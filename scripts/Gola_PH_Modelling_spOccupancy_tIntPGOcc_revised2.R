@@ -1,7 +1,6 @@
-#### Pygmy hippo static multi-season integrated occupancy model in spOccupancy  
+#### Pygmy hippo static multi-season integrated occupancy model in spOccupancy
 #### script written by Filibert Heim, filibert.heim@rspb.org.uk or filibert.heim@posteo.de, in April 2025, revised in May
 
-#### Version 2 #########################
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ##### 1. Preparatations ######
@@ -15,6 +14,7 @@ library(sf)
 library(data.table)
 library(spOccupancy)
 library(tmap)
+library(scales) # only for plot
 filter <- dplyr::filter
 select <- dplyr::select
 rename <- dplyr::rename 
@@ -186,6 +186,7 @@ locs_transects <- locs_transects %>%
 ##### 5. Bring data together for spOccupancy ######
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+# all nessecary data is organised in these data frames
 deploy_cam_visit_occu %>% head()
 envCovs_sf %>% head()
 locs_transects %>% head()
@@ -452,21 +453,26 @@ priors.list <- list(beta.normal = list(mean = 0, var = 2.72), # priors for beta,
                     sigma.sq.t.ig = NULL, 
                     rho.unif = NULL)
 
-
+# set model parameters 
+n.report <- 2
+batch.length <- 1500
+n.batch <- 10
+n.thin <- 3
+n.chains <- 4
 
 # call global model 
 gm <- tIntPGOcc(occ.formula = ~  river_density_med_large + Distance_large_river + Permanent_and_seasonal_water 
                 + Undisturbed_tropical_moist_forest 
                 + mean_elev + mean_slope
                 + Period_fact, 
-                det.formula = list(Transect = ~Transect_Length + Date_Transect + I(Date_Transect^2)  + as.factor(Season_Transect_fact) + as.factor(Period_Transect_fact) + (1| Year_Transect_num), 
-                                   Camera = ~Trapping_Days + Date_Camera + I(Date_Camera^2) + as.factor(Project_Camera) + as.factor(Season_Camera_fact) +  as.factor(Period_Camera_fact) + (1| Year_Camera_num)), 
+                det.formula = list(Transect = ~Transect_Length + I(Date_Transect^2)  + as.factor(Season_Transect_fact) + as.factor(Period_Transect_fact), 
+                                   Camera = ~Trapping_Days + I(Date_Camera^2) + as.factor(Project_Camera) + as.factor(Season_Camera_fact)  + (1| Year_Camera_num)), 
                 data = data.list,
-                n.report = 2,
-                n.batch = 12,
-                batch.length = 2000,
-                n.thin = 3, 
-                n.chains = 4)
+                n.report = n.report,
+                n.batch = n.batch,
+                batch.length = batch.length,
+                n.thin = n.thin, 
+                n.chains = n.chains)
 
 # call model summary 
 summary(gm)
@@ -481,16 +487,16 @@ MCMCplot(gm$beta.samples, ref_ovl = TRUE, ci = c(50, 95),  main = "Occupancy Eff
 MCMCplot(gm$alpha.samples, ref_ovl = TRUE, ci = c(50, 95),  main = "Detection Effect Sizes")
 
 # Goodness-of-fit test, freeman-tukey and grouped by sites, described in https://doserlab.com/files/spoccupancy-web/articles/spacetimemodelshtml
-ppc_gm <- ppcOcc(gm, fit.stat = 'freeman-tukey', group = 1) # group 1 - groups values by site, group 2 - groups values per replicate, there is also chi squared available
-summary(ppc_gm) # get bayes. p-value
+ppc_gm1 <- ppcOcc(gm, fit.stat = 'freeman-tukey', group = 1) # group 1 - groups values by site, group 2 - groups values per replicate, there is also chi squared available
+summary(ppc_gm1) # get bayes. p-value
 
 # visualise Goodness-of-fit 
 
-# produce a model check plot, code taken from https://doserlab.com/files/spoccupancy-web/articles/modelfitting
+# produce a model check plot, code example taken from https://doserlab.com/files/spoccupancy-web/articles/modelfitting
 ppc_result <- data.frame(fit = numeric(),fit.rep = numeric(),season = character(),dataset = character(),color = character())
 for(d in 1:length(gm$det.formula)){
   for(s in 1:length(gm$seasons[[d]])){
-    ppc_frame <- data.frame(fit = ppc_gm$fit.y[[d]][,s], fit.rep = ppc_gm$fit.y.rep[[d]][,s], 
+    ppc_frame <- data.frame(fit = ppc_gm1$fit.y[[d]][,s], fit.rep = ppc_gm1$fit.y.rep[[d]][,s], 
                             season = s, dataset = names(gm$det.formula)[d], color = 'lightskyblue1')
     ppc_frame$color[ppc_frame$fit.rep > ppc_frame$fit] <- 'lightsalmon'
     ppc_result <- rbind(ppc_result, ppc_frame)
@@ -533,13 +539,13 @@ rm(gm, ppc_gm)
 
 # set model parameters
 n.report <- 2
-batch.length <- 200
+batch.length <- 1500
 n.batch <- 10
 n.thin <- 3
 n.chains <- 4
-# occ.formula <- ~  river_density_med_large + Distance_large_river + Permanent_and_seasonal_water + Undisturbed_tropical_moist_forest + mean_elev + mean_slope+  NDVI_aug + EVI_feb + Period_fact
-# det.formula <- list(Transect = ~Transect_Length + Date_Transect + I(Date_Transect^2)  + as.factor(Season_Transect_fact) + as.factor(Period_Transect_fact) + (1| Year_Transect_num), 
-#                     Camera = ~Trapping_Days + Date_Camera + I(Date_Camera^2) + as.factor(Project_Camera) + as.factor(Season_Camera_fact) +  as.factor(Period_Camera_fact) + (1| Year_Camera_num))
+# occ.formula <- ~  river_density_med_large + Distance_large_river + Permanent_and_seasonal_water + Undisturbed_tropical_moist_forest + mean_elev + mean_slope + Period_fact
+# det.formula <- list(Transect = ~Transect_Length + I(Date_Transect^2)  + as.factor(Season_Transect_fact) + as.factor(Period_Transect_fact), 
+#                     Camera = ~Trapping_Days + I(Date_Camera^2) + as.factor(Project_Camera) + as.factor(Season_Camera_fact) + (1| Year_Camera_num))
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ##### 7.1 Detection submodels ######
@@ -553,8 +559,8 @@ n.chains <- 4
 
 # for date to decide on date or date^2
 
-date.formula <- list(~Transect_Length+as.factor(Season_Transect_fact)+Date_Transect, # build formulas 
-                     ~Transect_Length+as.factor(Season_Transect_fact)+I(Date_Transect^2))
+date.formula <- list(~Transect_Length+as.factor(Season_Transect_fact)+as.factor(Period_Transect_fact)+Date_Transect, # build formulas 
+                     ~Transect_Length+as.factor(Season_Transect_fact)+as.factor(Period_Transect_fact)+I(Date_Transect^2))
 model.comparison <- data.frame(occ = character(),det.transect = character(),det.camera = character(), # crate input df
                                wAIC = numeric(),wAIC.transect=numeric(),wAIC.camera=numeric(), step = character()) 
 for(d in 1:length(date.formula)){
@@ -568,6 +574,8 @@ for(d in 1:length(date.formula)){
                        wAIC=sum(waicOcc(model)[3]), # summed wAIC across both data sources
                        wAIC.transect=waicOcc(model)[3][1,], # 1st column is transect data, wAIC.transect
                        wAIC.camera=waicOcc(model)[3][2,], # 2nd column is camera data, wAIC
+                       max.Rhat = max(unlist(model$rhat)),
+                       min.ESS = min(unlist(model$ESS)),
                        step = 'det.transect.date')
   model.comparison <- rbind(model.comparison, c(output))
   
@@ -581,28 +589,30 @@ best.date.transect <- model.comparison %>% filter(step == 'det.transect.date') %
 
 # decide between period or (1|Year)
 
-year.formula <- list(as.formula(paste(best.date.transect, '+ as.factor(Period_Transect_fact)')), 
-                     as.formula(paste(best.date.transect, '+ (1| Year_Transect_num)')))
+# year.formula <- list(as.formula(paste(best.date.transect, '+ as.factor(Period_Transect_fact)')), 
+#                      as.formula(paste(best.date.transect, '+ (1| Year_Transect_num)')))
 
-for(f in 1:length(year.formula)){
-  # fit model
-  model <- tIntPGOcc(occ.formula = ~1, det.formula = list(Transect = year.formula[[f]], Camera = ~1), 
-                     data = data.list, n.report = n.report, n.batch = n.batch, batch.length = batch.length, n.thin = n.thin, n.chains = n.chains)
-  # save all values to model comparison table 
-  output <- data.frame(occ=paste('~',as.character(model$occ.formula)[2]), # occ
-                       det.transect=paste('~', as.character(model$det.formula[[1]])[2]), # det.transect
-                       det.camera=paste('~', as.character(model$det.formula[[2]])[2]), # det.camera
-                       wAIC=sum(waicOcc(model)[3]), # summed wAIC across both data sources
-                       wAIC.transect=waicOcc(model)[3][1,], # 1st column is transect data, wAIC.transect
-                       wAIC.camera=waicOcc(model)[3][2,], # 2nd column is camera data, wA
-                       step = 'det.transect.year')
-  model.comparison <- rbind(model.comparison, c(output))
-  
-  rm(model) # remove model object to clear memory
-}
+# for(f in 1:length(year.formula)){
+#   # fit model
+#   model <- tIntPGOcc(occ.formula = ~1, det.formula = list(Transect = year.formula[[f]], Camera = ~1), 
+#                      data = data.list, n.report = n.report, n.batch = n.batch, batch.length = batch.length, n.thin = n.thin, n.chains = n.chains)
+#   # save all values to model comparison table 
+#   output <- data.frame(occ=paste('~',as.character(model$occ.formula)[2]), # occ
+#                        det.transect=paste('~', as.character(model$det.formula[[1]])[2]), # det.transect
+#                        det.camera=paste('~', as.character(model$det.formula[[2]])[2]), # det.camera
+#                        wAIC=sum(waicOcc(model)[3]), # summed wAIC across both data sources
+#                        wAIC.transect=waicOcc(model)[3][1,], # 1st column is transect data, wAIC.transect
+#                        wAIC.camera=waicOcc(model)[3][2,], # 2nd column is camera data, wA
+#                         max.Rhat = max(unlist(model$rhat)),
+#                         min.ESS = min(unlist(model$ESS)),
+#                        step = 'det.transect.year')
+#   model.comparison <- rbind(model.comparison, c(output))
+#   
+#   rm(model) # remove model object to clear memory
+# }
 
 # get best year/period model and use this single best model (lowest wAIC) to build formula of next models 
-best.year.transect <- as.formula(model.comparison %>% filter(step == 'det.transect.year') %>% slice_min(wAIC.transect) %>% pull(det.transect)) # select best submodel based on wAIC for this particular data source
+# best.year.transect <- as.formula(model.comparison %>% filter(step == 'det.transect.year') %>% slice_min(wAIC.transect) %>% pull(det.transect)) # select best submodel based on wAIC for this particular data source
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -610,14 +620,14 @@ best.year.transect <- as.formula(model.comparison %>% filter(step == 'det.transe
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 # decide for date or date^2
-
+best.date.transect <- as.formula(best.date.transect)
 date.formula <- list(~Trapping_Days+as.factor(Season_Camera_fact)+Date_Camera, # build formulas 
                      ~Trapping_Days+as.factor(Season_Camera_fact)+I(Date_Camera^2))
 
 
 for(d in 1:length(date.formula)){
   # fit model
-  model <- tIntPGOcc(occ.formula = ~1, det.formula = list(Transect = best.year.transect, Camera = date.formula[[d]]), 
+  model <- tIntPGOcc(occ.formula = ~1, det.formula = list(Transect = best.date.transect, Camera = date.formula[[d]]), 
                      data = data.list, n.report = n.report, n.batch = n.batch, batch.length = batch.length, n.thin = n.thin, n.chains = n.chains)
   # save all values to model comparison table
   output <- data.frame(occ=paste('~',as.character(model$occ.formula)[2]), # occ
@@ -625,7 +635,9 @@ for(d in 1:length(date.formula)){
                        det.camera=paste('~', as.character(model$det.formula[[2]])[2]), # det.camera
                        wAIC=sum(waicOcc(model)[3]), # summed wAIC across both data sources
                        wAIC.transect=waicOcc(model)[3][1,], # 1st column is transect data, wAIC.transect
-                       wAIC.camera=waicOcc(model)[3][2,], # 2nd column is camera data, wA
+                       wAIC.camera=waicOcc(model)[3][2,], # 2nd column is camera data, wAIC
+                       max.Rhat = max(unlist(model$rhat)),
+                       min.ESS = min(unlist(model$ESS)),
                        step = 'det.camera.date')
   model.comparison <- rbind(model.comparison, c(output))
   
@@ -643,7 +655,7 @@ project.formula <- list(as.formula(paste(best.date.camera, '+ Project_Camera')),
 
 for(d in 1:length(project.formula)){
   # fit model
-  model <- tIntPGOcc(occ.formula = ~1, det.formula = list(Transect = best.year.transect, Camera = project.formula[[d]]), 
+  model <- tIntPGOcc(occ.formula = ~1, det.formula = list(Transect = best.date.transect, Camera = project.formula[[d]]), 
                      data = data.list, n.report = n.report, n.batch = n.batch, batch.length = batch.length, n.thin = n.thin, n.chains = n.chains)
   # save all values to model comparison table
   output <- data.frame(occ=paste('~',as.character(model$occ.formula)[2]), # occ
@@ -652,6 +664,8 @@ for(d in 1:length(project.formula)){
                        wAIC=sum(waicOcc(model)[3]), # summed wAIC across both data sources
                        wAIC.transect=waicOcc(model)[3][1,], # 1st column is transect data, wAIC.transect
                        wAIC.camera=waicOcc(model)[3][2,], # 2nd column is camera data, wA
+                       max.Rhat = max(unlist(model$rhat)),
+                       min.ESS = min(unlist(model$ESS)),
                        step = 'det.camera.project')
   model.comparison <- rbind(model.comparison, c(output))
   
@@ -669,7 +683,7 @@ year.formula <- list(as.formula(paste(best.period.camera, '+ as.factor(Period_Ca
 
 for(d in 1:length(date.formula)){
   # fit model
-  model <- tIntPGOcc(occ.formula = ~1, det.formula = list(Transect = best.year.transect, Camera = year.formula[[d]]), 
+  model <- tIntPGOcc(occ.formula = ~1, det.formula = list(Transect = best.date.transect, Camera = year.formula[[d]]), 
                      data = data.list, n.report = n.report, n.batch = n.batch, batch.length = batch.length, n.thin = n.thin, n.chains = n.chains)
   # save all values to model comparison table
   output <- data.frame(occ=paste('~',as.character(model$occ.formula)[2]), # occ
@@ -678,6 +692,8 @@ for(d in 1:length(date.formula)){
                        wAIC=sum(waicOcc(model)[3]), # summed wAIC across both data sources
                        wAIC.transect=waicOcc(model)[3][1,], # 1st column is transect data, wAIC.transect
                        wAIC.camera=waicOcc(model)[3][2,], # 2nd column is camera data, wA
+                       max.Rhat = max(unlist(model$rhat)),
+                       min.ESS = min(unlist(model$ESS)),
                        step = 'det.camera.year')
   model.comparison <- rbind(model.comparison, c(output))
   
@@ -690,7 +706,7 @@ best.year.camera <- model.comparison %>% filter(step == 'det.camera.year') %>% s
 
 
 # bring best formulas together 
-det.formula <- list(Transect = as.formula(best.year.transect),
+det.formula <- list(Transect = as.formula(best.date.transect),
                           Camera = as.formula(best.year.camera))
 
 
@@ -718,6 +734,8 @@ for(w in 1:length(water.formula)){
                        wAIC=sum(waicOcc(model)[3]), # summed wAIC across both data sources
                        wAIC.transect=waicOcc(model)[3][1,], # 1st column is transect data, wAIC.transect
                        wAIC.camera=waicOcc(model)[3][2,], # 2nd column is camera data, wA
+                       max.Rhat = max(unlist(model$rhat)),
+                       min.ESS = min(unlist(model$ESS)),
                        step = 'occ.water')
   model.comparison <- rbind(model.comparison, c(output))
   
@@ -742,6 +760,8 @@ for(w in 1:length(topography.formula)){
                        wAIC=sum(waicOcc(model)[3]), # summed wAIC across both data sources
                        wAIC.transect=waicOcc(model)[3][1,], # 1st column is transect data, wAIC.transect
                        wAIC.camera=waicOcc(model)[3][2,], # 2nd column is camera data, wA
+                       max.Rhat = max(unlist(model$rhat)),
+                       min.ESS = min(unlist(model$ESS)),
                        step = 'occ.topography')
   model.comparison <- rbind(model.comparison, c(output))
   
@@ -757,7 +777,7 @@ best.topography <- as.formula(model.comparison %>% filter(step == 'occ.topograph
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 n.report <- 2
-batch.length <- 2000
+batch.length <- 1500
 n.batch <- 10
 n.thin <- 3
 n.chains <- 4
@@ -780,17 +800,10 @@ MCMCplot(best.model$alpha.samples, ref_ovl = TRUE, ci = c(50, 95),  main = "Dete
 ##### 9. Predict Occupancy throughout the study area  ######
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-# THIS IS THE STRATEGY I APPLIED TO SCALE THE VALUES IN THE SAME WAY AS I DID BEFORE FITTING THE MODEL
+# since the predictors were scaled before fitting the model, the envionmental covariates used to predict and extrapolate throughout Gola 
+# have to be scaled with the same factors as the scaling was done before
 
-# Get scaling parameters from vec1
-# mean1 <- mean(vec1)
-# sd1 <- sd(vec1)
-
-# Scale vec1
-# scaled_vec1 <- scale(vec1)
-
-# Scale vec2 using vec1's parameters
-# scaled_vec2 <- (vec2 - mean1) / sd1
+# approach: take mean and sd from old data model was trained with - then take new environmental covariates and manually scale them with these factors ((envCovs - train.data.mean) / train.data.sd)
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -801,7 +814,7 @@ MCMCplot(best.model$alpha.samples, ref_ovl = TRUE, ci = c(50, 95),  main = "Dete
 ##### 9.1.1 SiteCovs ######
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-# get site covariates and normalize then with the same parameters as scaling was done before model fitting 
+# get site covariates and normalize them with the same parameters as scaling was done before model fitting 
 op <- all.vars(best.model$occ.formula)[!all.vars(best.model$occ.formula) %in% names(year.site.covs.list)]
 envCovs_pred <- envCovs_sf[,c(op, 'CellID')] %>% st_drop_geometry()
 for(o in op){
@@ -848,7 +861,7 @@ for(year.occ in year.occ.preds){
 }
 
 # manually add period_fact
-period.fact <- array(data = rep((c(0, 1))), 
+period.fact <- array(data = rep((c(0, 1)), each = dim(year.occ.preds.array)[1]), 
       dim = c(nrow(envCovs), length(best.model$seasons[[1]]), 1), 
       dimnames = list(CellID = as.character(envCovs_pred$CellID), Period = paste0("Period_", 1:length(best.model$seasons[[1]])), Occ.covs = 'Period_fact'))
 
@@ -857,36 +870,9 @@ library(abind)
 X.0.pred <- abind(X.0, year.occ.preds.array, period.fact, along = 3)
 X.0.pred <- X.0.pred[,,c('(Intercept)', all.vars(best.model$occ.formula))] # this ensures, that the variables are in the correct order!
 
-str(X.0.pred)
-dimnames(X.0.pred)
-#################################################################################
-#for(year.occ in year.occ.preds){
-#  for (s in 1:length(best.model$seasons[[1]])){
-#    variable <- paste0('JRC_ann_changes_', year.occ, c('_2013', '_2021')[s])
-#    
-#    sd.sites <- sd(as.numeric(envCovs_all_unscaled[[variable]])) # use the data the model was fitted with for calculation of mean and sd for normalization
-#    mean.sites <- mean(envCovs_all_unscaled[[variable]])
-    
-#    year.occ.preds.array[,s,year.occ] <- (envCovs_sf[[variable]] -mean.sites) / sd.sites # apply above calc normalization factors to whole study area envCovs 
-#  }
-#}
-
-
-#occ.preds.year <- array(data = c(as.numeric(scale(c(envCovs$JRC_ann_changes_Undisturbed_tropical_moist_forest_2013, envCovs$JRC_ann_changes_Undisturbed_tropical_moist_forest_2021))), 
-#                                 as.numeric(scale(c(envCovs$JRC_ann_changes_Permanent_and_seasonal_water_2013, envCovs$JRC_ann_changes_Permanent_and_seasonal_water_2021))),
-#                                 #as.numeric(scale(rep(c(1, 2), each = nrow(envCovs)))),
-#                                 as.factor(rep(c('2011-2017', '2018-2025'), each = nrow(envCovs)))), 
-#      dim = c(nrow(envCovs), 2, 3), 
-#      dimnames = list(paste0(1:nrow(envCovs)), paste0("Period_", 1:length(best.model$seasons[[1]])),c( 'Undisturbed_tropical_moist_forest',"Permanent_and_seasonal_water",'Period_fact')))
-
-# bring all prepared occ.covs for prediction together into one array 
-#library(abind) # this is a package which makes binding arrays much easier
-#X.0 <- abind(X.0, occ.preds.year, along = 3) 
-#X.0 <- X.0[,,c('(Intercept)', all.vars(best.model$occ.formula))] # this ensures, that the variables are in the correct order!
-
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-##### 9.2 Predict and plot ######
+##### 9.2 Predict ######
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 # predict 
@@ -905,13 +891,19 @@ for(p in 1:length(best.model$seasons[[1]])){
   plot_bm <- bind_rows(plot_bm, prediction)
 }
 
+# bring into long format 
+# plot_bm <- plot_bm %>% pivot_longer(cols = -c(CellID, Period), 
+#                          names_to = 'pred.type', 
+#                          values_to = 'pred.value')
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##### 9.3 Format predicted data and plot ######
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 # create sf
 plot_bm_sf <- envCovs_sf %>% select(CellID) %>% 
   left_join(plot_bm, join_by(CellID))
-
-################################################################################
-######## SEARCH MISTAKE FROM HERE ##############################################
-################################################################################
 
 
 # get information on data the model was trained with
@@ -936,16 +928,15 @@ for(p in 1:length(best.model$seasons[[1]])){
   }
 }
 
-
 # get values predictions were made for
 pred.values <- data.frame(Period = character(), CellID = numeric())
 for(p in 1:length(best.model$seasons[[1]])){
-    df <- data.frame(Period = rep(c('2011-2017', '2018-2025')[p], times = dim(X.0)[1]),
-                     X.0[,p,]) %>% mutate(CellID = row_number())
+    df <- data.frame(Period = rep(c('2011-2017', '2018-2025')[p], times = dim(X.0.pred)[1]),
+                     X.0.pred[,p,]) %>% mutate(CellID = row_number())
     df$X.Intercept. <- NULL
     df$Period_fact <- NULL
     pred.values <- bind_rows(pred.values, df)
-    rm(df)
+    # rm(df)
 }
 
 # bring pred values into long format 
@@ -958,29 +949,45 @@ pred.values = pred.values %>%
 pred.values <- pred.values %>% 
   left_join(pred.limits, join_by(variable, Period), relationship = 'many-to-many')
 
+
 # flag all values that lie within the borders of what the model was trained for, flag extrapolations
 flag <- pred.values %>% ungroup() %>% 
-  mutate(extrapol = if_else(value > train_min & value < train_max, 1, 0.5)) %>% 
+  mutate(extrapol = if_else(value >= train_min & value <= train_max, 1, 0.5)) %>% 
   group_by(CellID, Period) %>% 
-  summarise(flag = sum(extrapol), 
-            alpha = as.numeric(if_else(sum(extrapol) > length(preds), 1, 0.95)))
+  reframe(flag = sum(extrapol), 
+            alpha = as.numeric(if_else(sum(extrapol) == length(preds), 1, 0.95)))
 
 # plot prediction
-plot_bm_sf %>% left_join(flag, join_by(CellID, Period)) %>% 
+library(ggspatial)
+
+pred_map <- plot_bm_sf %>% 
+  left_join(flag, join_by(CellID, Period)) %>% mutate(outline = if_else(alpha == 1, 'in', 'outside')) %>%
   ggplot() +
-  #annotation_map_tile(zoom = 10, type = 'cartolight') +
-  geom_sf(aes(fill = pred_mean)) +  # Use pred_mean for fill color
-  scale_fill_viridis_c(option = "plasma", name = "Predicted \nOccupancy", limits = c(0,1), direction = -1) + # scale_fill_viridis_c(option = "magma"), or replace "magma" with "inferno", "plasma", "cividis", 
+  geom_sf(aes(fill = pred_mean, alpha = alpha, col = outline)) +  # alpha is numeric (e.g., 1 or 0.6)
+  #geom_sf(data = locs_transects %>% mutate(Period = if_else(Period == 1, '2011-2017', '2018-2025')), aes(linetype = "Transect lines"), color = "forestgreen", linewidth = 1) +
+  #geom_sf(data = deploy_cam_visit %>% mutate(Period = if_else(Period == 1, '2011-2017', '2018-2025')) %>% group_by(SiteID, Period) %>% summarise(deploy_length = as.numeric(sum(Visit_length))), 
+  #        aes(size = deploy_length), col = 'black') +
+  scale_fill_viridis_c(option = "plasma", name = "Predicted \nOccupancy", limits = c(0, 1), direction = -1) +
+  #scale_linetype_manual(name = "Transect surveys", values = c("Transect lines" = "solid")) +
+  #scale_size_continuous(name = "Camera deployment \nlength in days", range = c(0.2, 1.5)) +
+  scale_alpha_continuous(range = c(0.5, 1), guide = "none") +  # optional: hide alpha legend
+  scale_color_manual(name = "Extrapolation",
+    values = c("in" = "gray30", "outside" = "grey60")) +
   facet_grid(~Period) +
   theme_bw() +
-  theme(legend.position = c(0.95, 0.25), 
-        panel.border = element_rect(color = "darkgrey", fill = NA, linewidth = 1), # add frame
-        axis.line = element_blank()) +
+  theme(legend.position = c(0.95, 0.25), # 
+    panel.border = element_rect(color = "darkgrey", fill = NA, linewidth = 1), 
+    axis.line = element_blank()) +
   labs(title = "Predicted Pygmy Hippo Occupancy Probability", 
-       subtitle = "Based on an Static Multi Year Integrated Occupancy Model fitted in spOccupancy", 
-       x = 'Longitude', y = 'Latutude')
+    subtitle = "Based on a Static Multi-Year Integrated Occupancy Model fitted in spOccupancy", 
+    x = 'Longitude', y = 'Latitude')
 
-#ggsave(filename = 'output/plots/PH_hotspot_map_all_data.jpg', plot = hotspot_map, height = 6, width = 12)
+
+ggsave(filename = 'output/plots/PH_tIntPGOcc_predicted_map.jpg', plot = pred_map, height = 7, width = 16)
+
+
+
+
 
 
 
@@ -992,13 +999,11 @@ plot_bm_sf %>% left_join(flag, join_by(CellID, Period)) %>%
 
 # get all occu predictors + intercept for prediction which vary at site not year-site level
 occ.preds <- c('(Intercept)', all.vars(best.model$occ.formula))
-n <- 1000 # number of predictions per variable 
+n <- 2000 # number of predictions per variable 
 head(X.0.pred) # this is the old array for prediction in gola 
 X.0.mrgnl.effects <- array(data = NA, dim = c(n, length(best.model$seasons[[1]]), length(occ.preds)))
 dimnames(X.0.mrgnl.effects) <- list(NULL, Period = paste0("Period_", 1:length(best.model$seasons[[1]])), Occ.covs = occ.preds)
 
-head(X.0.mrgnl.effects)
-head(X.0.pred)
 
 # use old array to built a new one with constant values 
 for(o in occ.preds){
@@ -1035,33 +1040,57 @@ for(o in occ.preds){
   # plot.mrgnl.effects <- bind_rows(plot.mrgnl.effects, prediction.mrgnl.effects)
 }
 
-# recode variable names 
+# recode variable names with units
 plot.mrgnl.effects <- plot.mrgnl.effects %>%
   mutate(Variable = recode(variable,
-                           "Distance_large_river" = "Distance to large river",
-                           "mean_elev" = "Elevation",
+                           "Distance_large_river" = "Distance to large river in m",
+                           'river_density_med_large' = 'Density of medium and large rivers',
+                           "mean_elev" = "Elevation in m asl.",
                            "mean_slope" = "Slope",
-                           "Permanent_and_seasonal_water" = "Permanent and seasonal water",
-                           "Undisturbed_tropical_moist_forest" = "Undisturbed tropical moist forest")) 
+                           "Permanent_and_seasonal_water" = "Fraction of permanent and seasonal water per grid cell",
+                           "Undisturbed_tropical_moist_forest" = "Fraction of undisturbed tropical moist forest per grid cell")) 
 
-# add unscaled values to marginal effects df 
+# add unscaled values to marginal effects df
+preds <- setdiff(all.vars(best.model$occ.formula), "Period_fact") # all predictors except of Period_fact are important here 
+plot.mrgnl.effects$value_unscaled <- NA
+for(pred in preds){
+  for(p in 1:length(best.model$seasons[[1]])){
+    if(is.matrix(occ.covs[[pred]])){ # alll yearly site covs should be a matrix
+      value_unscaled <- seq(from = min(occ.covs[[paste0(pred, '_unscaled')]][,p]), to = max(occ.covs[[paste0(pred, '_unscaled')]][,p]), length.out = n)
+    } else{
+      value_unscaled <- seq(from = min(occ.covs[[paste0(pred, '_unscaled')]]), to = max(occ.covs[[paste0(pred, '_unscaled')]]), length.out = n)
+    }
+    plot.mrgnl.effects$value_unscaled[plot.mrgnl.effects$variable == pred & plot.mrgnl.effects$Period == c('2011-2017', '2018-2025')[p]] <- value_unscaled
+  }
+}
 
-test <- plot.mrgnl.effects %>% 
-  mutate(value_unscaled = case_when(variable == 'mean_elev' & Period == '2011-2017' ~ 
-                                      seq(from = min(envCovs_all_unscaled$mean_elev), to = max(envCovs_all_unscaled$mean_elev), length.out = n))) %>% View()
-
-
-
-# produce a plot 
-plot.mrgnl.effects %>% filter(!variable %in% c('(Intercept)', 'Period_fact')) %>% 
+# produce plot 
+marginal.effects.vis <- plot.mrgnl.effects %>% filter(!variable %in% c('(Intercept)', 'Period_fact')) %>% 
   ggplot() +
-  geom_ribbon(aes(x = value, ymin = pred.lower, ymax = pred.upper, fill = Period), alpha = 0.3, linewidth = 1.2)+
-  geom_line(mapping = aes(x = value, y = pred.mean, color = Period)) +
+  geom_ribbon(aes(x = value_unscaled, ymin = pred.lower, ymax = pred.upper, fill = Period), alpha = 0.3, linewidth = 1.2)+
+  geom_line(mapping = aes(x = value_unscaled, y = pred.mean, color = Period), linewidth = 1.1) +
+  scale_color_manual(values = c("2011-2017" = "#E69F00", "2018-2025" = "#56B4E9")) +
+  scale_fill_manual(values = c("2011-2017" = "#E69F00", "2018-2025" = "#56B4E9")) +
   facet_wrap(~Variable, scale = 'free_x') + 
   theme_bw(base_size = 13) +
-  labs(x = 'Environmental covariates', y = 'Predicted Occupancy', title = 'Effect of Environmental Covariates on Occupancy') +
-  theme(legend.background = element_rect(color = "gray30"), 
-        legend.position = c(0.85, 0.25))
+  labs(x = 'Environmental covariates', y = 'Predicted occupancy', title = 'Effect of environmental covariates on occupancy') +
+  theme(#legend.background = element_rect(color = "gray30"), 
+        #legend.position = c(0.85, 0.25)
+        )
+ggsave(filename = 'output/plots/PH_marginal_effects.jpg', plot = marginal.effects.vis, height = 8, width = 10)
 
-summary(best.model)
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##### 11. Export all essential data ######
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+
+# save whole workspace 
+save.image(file = "output/PH_workspace.Rdata")
+
+
+# save all important objects 
+save(best.model, ppc_gm, model.comparison, data.list, plot.mrgnl.effects, plot_bm_sf, 
+     flag, envCovs_sf, ppc_result, fit_result, pred.limits, plot_bm, marginal.effects.vis, pred_map,
+     file = 'PH_tIntPGOcc_output.RData')
+
 

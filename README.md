@@ -1,4 +1,4 @@
-# Pygmy hippo modelling Gola, Sierra Leone
+# Pygmy hippo distribution modelling Gola, Sierra Leone
 
 Pygmy hippos are elusive and rare forest mammals of conservation concern that occur in the Greater Gola Landscape, Sierra Leone. 
 Unfortunately, limited knowledge exists on distribution of pygmy hippos across Gola, the drivers of occurence as well as changes in occurence over time. 

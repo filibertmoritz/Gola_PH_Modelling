@@ -13,6 +13,6 @@ In more detail we apply the following steps:
   
   **3. Find relevant environmental covariates:** Thrid, we fit a conditional random forest model on the pooled data to find relevant predictor variables and you can find this script [here](https://github.com/filibertmoritz/Gola_PH_Modelling/blob/main/scripts/Gola_PH_RF_variable_selection_period_weights.R).
   
-  ***4. Fit occupancy model:** Lastly, we fit a static multi-season occupancy model using solely the most important environmental covariates, please find the script [here](https://github.com/filibertmoritz/Gola_PH_Modelling/blob/main/scripts/Gola_PH_Modelling_spOccupancy_tIntPGOcc_revised2.R).
+  **4. Fit occupancy model:** Lastly, we fit a static multi-season occupancy model using solely the most important environmental covariates, please find the script [here](https://github.com/filibertmoritz/Gola_PH_Modelling/blob/main/scripts/Gola_PH_Modelling_spOccupancy_tIntPGOcc_revised2.R).
 
 
